@@ -51,8 +51,8 @@ node_modules/
 # Ignore the publish output of .NET Core projects
 publish/
 
-# Ignore build outputs of IdentityServer
-IdentityServer4/
+# Migrations
+Migrations/
 
 # Ignore temporary files and logs
 *.log

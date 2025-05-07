@@ -1,0 +1,194 @@
+﻿using IdentityServer.Domain.Services;
+using IdentityServer.Entities;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+
+namespace IdentityServer.Controllers;
+
+[Route("api/[controller]")]
+[ApiController]
+public class AuthController : ControllerBase
+{
+    private readonly UserManager<User> _userManager;
+    private readonly SignInManager<User> _signInManager;
+    private readonly ITokenService _tokenService;
+    private readonly ApplicationDbContext _context;
+
+    public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context)
+    {
+        _userManager = userManager;
+        _signInManager = signInManager;
+        _tokenService = tokenService;
+        _context = context;
+    }
+
+    // POST: api/auth/register
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] DataModel model)
+    {
+        if (model.FirstName == null || model.LastName == null || model.Password == null)
+        {
+            return BadRequest($"Invalid data, {model}");
+        }
+
+        var user = new User
+        {
+            UserName = model.Username,
+            FirstName = model.FirstName,
+            LastName = model.LastName,
+            CreatedAt = DateTime.UtcNow,
+            Email = model.Email,
+        };
+
+        var result = await _userManager.CreateAsync(user, model.Password);
+
+        if (!result.Succeeded)
+            return BadRequest(result.Errors);
+        
+        var jwt = _tokenService.GenerateJwtToken(user);
+        var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+        
+        user.RefreshTokens.Add(refreshToken);
+        await _userManager.UpdateAsync(user);
+        await _userManager.AddToRoleAsync(user, "User");
+        
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            token = jwt,
+            refreshToken = refreshToken.Token
+        });
+    }
+    
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] DataModel model)
+    {
+        if (model == null)
+        {
+            return BadRequest("No credentials recieved!");
+        }
+
+        if (model.Username != null)
+        {
+            return await LoginByUsername(model);
+        } else if (model.Email != null)
+        {
+            return await LoginByEmail(model);
+        }
+        else if (model.JWT != null)
+        {
+            return await LoginWithJWT(model);
+        }
+
+        return BadRequest("Could not find suitable auth method!");
+    }
+
+    private async Task<IActionResult> LoginWithJWT(DataModel model)
+    {
+        var principal = _tokenService.GetPrincipalFromExpiredToken(model.JWT);
+        if (principal == null)
+            return Unauthorized("Invalid token");
+
+        var username = principal.Identity?.Name;
+        if (string.IsNullOrEmpty(username))
+            return Unauthorized("Invalid token");
+
+        var user = await _userManager.FindByNameAsync(username);
+        if (user == null)
+            return Unauthorized("User not found");
+
+        var hasValidRefreshToken = user.RefreshTokens.Any(rt => rt.Token == model.RefreshToken && rt.IsActive);
+        if (!hasValidRefreshToken)
+            return Unauthorized("Refresh token is not valid or expired");
+
+        var newJwt = _tokenService.GenerateJwtToken(user);
+        var newRefreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+
+        user.RefreshTokens.Add(newRefreshToken);
+        await _userManager.UpdateAsync(user);
+
+        var userRoles = await _userManager.GetRolesAsync(user);
+
+        return Ok(new DataModel
+        {
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Username = user.UserName,
+            Email = user.Email,
+            Roles = userRoles.ToList(),
+            JWT = newJwt,
+            RefreshToken = newRefreshToken.Token
+        });
+    }
+
+    private async Task<IActionResult> LoginByEmail(DataModel model)
+    {
+        if (string.IsNullOrEmpty(model.Email) || string.IsNullOrEmpty(model.Password))
+            return BadRequest("Email or Password is missing");
+        
+        var user = await _userManager.FindByEmailAsync(model.Email);
+        if (user == null)
+            return Unauthorized("Invalid credentials");
+        
+        return await TryLogin(user, model.Password);
+    }
+
+    private async Task<IActionResult> LoginByUsername(DataModel model)
+    {
+        if (string.IsNullOrEmpty(model.Username) || string.IsNullOrEmpty(model.Password))
+            return BadRequest("Username or Password is missing");
+
+        var user = await _userManager.FindByNameAsync(model.Username);
+        if (user == null)
+            return Unauthorized("Invalid credentials");
+
+        return await TryLogin(user, model.Password);
+    }
+
+    private async Task<IActionResult> TryLogin(User user, string password)
+    {
+        var result = await _signInManager.PasswordSignInAsync(user, password, false, false);
+        if (!result.Succeeded)
+            return Unauthorized("Invalid credentials");
+
+        var jwt = _tokenService.GenerateJwtToken(user);
+
+        var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+
+        user.RefreshTokens.Add(refreshToken);
+        await _userManager.UpdateAsync(user);
+
+        var userRoles = await _userManager.GetRolesAsync(user);
+        var data = new DataModel
+        {
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Username = user.UserName,
+            Email = user.Email,
+            Roles = userRoles.ToList(),
+            JWT = jwt,
+            RefreshToken = refreshToken.Token
+        };
+        return Ok(data);
+    }
+
+}
+
+public class DataModel
+{
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public string? Username { get; set; }
+    public string? Password { get; set; }
+    public string? Email { get; set; }
+    public ICollection<string>? Roles { get; set; }
+    
+    public string? JWT { get; set; }
+    public string? RefreshToken { get; set; }
+
+    public override string ToString()
+    {
+        return $"{Username}\n{FirstName}\n{LastName}\n{Password}\n{Email}\n{RefreshToken}\n{JWT}";
+    }
+}
