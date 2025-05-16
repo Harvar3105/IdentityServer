@@ -20,6 +20,7 @@ else
     builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
         .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 }
+builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>

@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${SA_PASSWORD}
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "1433" ]
+      interval: 30s
+      retries: 5
+      start_period: 10s
+    networks:
+      - shared-network
+  
+  authserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: authserver
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=IdentityServerDB;User Id=sa;Password=1234!AbcD;TrustServerCertificate=true;
+    ports:
+      - "8080:8080"
+    depends_on:
+      - sqlserver 
+    networks:
+      - shared-network
+
+volumes:
+  sqlserver_data:
+
+networks:
+  shared-network:
+    name: shared-network
+    external: true
