@@ -2,6 +2,7 @@
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace IdentityServer.Controllers;
 
@@ -86,40 +87,79 @@ public class AuthController : ControllerBase
 
     private async Task<IActionResult> LoginWithJWT(DataModel model)
     {
-        var principal = _tokenService.GetPrincipalFromExpiredToken(model.JWT);
-        if (principal == null)
-            return Unauthorized("Invalid token");
+        try
+        {
+            var principal = _tokenService.GetPrincipalFromExpiredToken(model.JWT);
+            if (principal == null)
+            {
+                throw new Exception("Invalid JWT!");
+            }
 
-        var username = principal.Identity?.Name;
-        if (string.IsNullOrEmpty(username))
-            return Unauthorized("Invalid token");
+            var username = principal.Identity?.Name;
+            if (string.IsNullOrEmpty(username))
+            {
+                throw new Exception("Invalid identity!");
+            }
+            
+            var user = await _userManager.FindByNameAsync(username);
+            if (user == null)
+            {
+                throw new Exception("User not found!");
+            }
+            
+            var roles = await _userManager.GetRolesAsync(user);
+            return Ok(new DataModel
+            {
+                Id = user.Id,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Username = user.UserName,
+                Email = user.Email,
+                Roles = roles.ToList(),
+                JWT = model.JWT,
+                RefreshToken = null
+            });
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrEmpty(model.RefreshToken))
+            {
+                var result = await TryLoginWithRefreshToken(model.RefreshToken);
+                if (result != null) return Ok(result);
+            }
+            
+            return Unauthorized(ex.Message);
+        }
+    }
+    
+    private async Task<DataModel?> TryLoginWithRefreshToken(string refreshToken)
+    {
+        var user = await _userManager.Users
+            .Where(u => u.RefreshTokens.Any(rt => rt.Token == refreshToken && rt.IsActive))
+            .FirstOrDefaultAsync();
 
-        var user = await _userManager.FindByNameAsync(username);
-        if (user == null)
-            return Unauthorized("User not found");
-
-        var hasValidRefreshToken = user.RefreshTokens.Any(rt => rt.Token == model.RefreshToken && rt.IsActive);
-        if (!hasValidRefreshToken)
-            return Unauthorized("Refresh token is not valid or expired");
+        if (user == null) return null;
 
         var newJwt = _tokenService.GenerateJwtToken(user);
-        var newRefreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+        var newRefreshToken = _tokenService.GenerateRefreshToken(
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
 
         user.RefreshTokens.Add(newRefreshToken);
         await _userManager.UpdateAsync(user);
 
-        var userRoles = await _userManager.GetRolesAsync(user);
+        var roles = await _userManager.GetRolesAsync(user);
 
-        return Ok(new DataModel
+        return new DataModel
         {
+            Id = user.Id,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Username = user.UserName,
             Email = user.Email,
-            Roles = userRoles.ToList(),
+            Roles = roles.ToList(),
             JWT = newJwt,
             RefreshToken = newRefreshToken.Token
-        });
+        };
     }
 
     private async Task<IActionResult> LoginByEmail(DataModel model)
@@ -162,6 +202,7 @@ public class AuthController : ControllerBase
         var userRoles = await _userManager.GetRolesAsync(user);
         var data = new DataModel
         {
+            Id = user.Id,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Username = user.UserName,
@@ -177,6 +218,7 @@ public class AuthController : ControllerBase
 
 public class DataModel
 {
+    public Guid? Id { get; set; }
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
     public string? Username { get; set; }
