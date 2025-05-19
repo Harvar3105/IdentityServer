@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
 using IdentityServer;
 using IdentityServer.Domain.Services;
@@ -42,6 +44,8 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 
 var twp = new TokenValidationParameters
 {
+    RoleClaimType = ClaimTypes.Role,
+    NameClaimType = JwtRegisteredClaimNames.UniqueName,
     ValidateIssuer = true,
     ValidateAudience = true,
     ValidateIssuerSigningKey = true,

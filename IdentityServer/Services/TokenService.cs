@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Services;
@@ -13,11 +14,13 @@ public class TokenService : ITokenService
     private readonly IConfiguration _config;
     private readonly TokenValidationParameters _twp;
     private readonly JwtSecurityTokenHandler _tokenHandler = new();
+    private readonly UserManager<User> _userManager;
 
-    public TokenService(IConfiguration config, TokenValidationParameters twp)
+    public TokenService(IConfiguration config, TokenValidationParameters twp, UserManager<User> userManager)
     {
         _config = config;
         _twp = twp;
+        _userManager = userManager;
     }
     
     public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
@@ -44,13 +47,18 @@ public class TokenService : ITokenService
         }
     }
 
-    public string GenerateJwtToken(User user)
+    public async Task<string> GenerateJwtToken(User user)
     {
-        var claims = new[]
+        var claims = new List<Claim>
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName!)
         };
+
+        foreach (var role in await _userManager.GetRolesAsync(user))
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
 
         var key = _twp.IssuerSigningKey;
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

@@ -140,7 +140,7 @@ public class AuthController : ControllerBase
 
         if (user == null) return null;
 
-        var newJwt = _tokenService.GenerateJwtToken(user);
+        var newJwt = await _tokenService.GenerateJwtToken(user);
         var newRefreshToken = _tokenService.GenerateRefreshToken(
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
 
@@ -192,7 +192,7 @@ public class AuthController : ControllerBase
         if (!result.Succeeded)
             return Unauthorized("Invalid credentials");
 
-        var jwt = _tokenService.GenerateJwtToken(user);
+        var jwt = await _tokenService.GenerateJwtToken(user);
 
         var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
 
