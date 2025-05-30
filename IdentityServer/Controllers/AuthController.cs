@@ -135,7 +135,10 @@ public class AuthController : ControllerBase
     private async Task<DataModel?> TryLoginWithRefreshToken(string refreshToken)
     {
         var user = await _userManager.Users
-            .Where(u => u.RefreshTokens.Any(rt => rt.Token == refreshToken && rt.IsActive))
+            .Where(u => u.RefreshTokens.Any(rt =>
+                rt.Token == refreshToken &&
+                rt.Expires > DateTime.UtcNow &&
+                rt.Revoked == null))
             .FirstOrDefaultAsync();
 
         if (user == null) return null;
