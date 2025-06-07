@@ -25,6 +25,9 @@ else
 builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddOpenApi();
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
