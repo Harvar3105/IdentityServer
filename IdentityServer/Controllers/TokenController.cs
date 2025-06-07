@@ -41,7 +41,7 @@ public class TokenController : ControllerBase
             return BadRequest("Invalid token");
         }
 
-        var username = principal.Identity?.Name;
+        var username = principal.Claims.FirstOrDefault(c => c.Type.Equals(JwtRegisteredClaimNames.UniqueName))?.Value;
         var user = await _userManager.FindByNameAsync(username);
         if (user == null)
         {

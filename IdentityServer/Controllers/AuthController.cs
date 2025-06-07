@@ -1,4 +1,5 @@
-﻿using IdentityServer.Domain.Services;
+﻿using System.IdentityModel.Tokens.Jwt;
+using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -95,7 +96,7 @@ public class AuthController : ControllerBase
                 throw new Exception("Invalid JWT!");
             }
 
-            var username = principal.Identity?.Name;
+            var username = principal.Claims.FirstOrDefault(c => c.Type.Equals(JwtRegisteredClaimNames.UniqueName))?.Value;
             if (string.IsNullOrEmpty(username))
             {
                 throw new Exception("Invalid identity!");
