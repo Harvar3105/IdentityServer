@@ -4,6 +4,7 @@ using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Controllers;
@@ -15,12 +16,14 @@ public class TokenController : ControllerBase
     private readonly UserManager<User> _userManager;
     private readonly ITokenService _tokenService;
     private readonly ILogger<TokenController> _logger;
+    private readonly ApplicationDbContext _dbContext;
 
-    public TokenController(UserManager<User> userManager, ITokenService tokenService, ILogger<TokenController> logger)
+    public TokenController(UserManager<User> userManager, ITokenService tokenService, ILogger<TokenController> logger, ApplicationDbContext dbContext)
     {
         _userManager = userManager;
         _tokenService = tokenService;
         _logger = logger;
+        _dbContext = dbContext;
     }
     
     [HttpPost("refresh")]
@@ -41,8 +44,10 @@ public class TokenController : ControllerBase
             return BadRequest("Invalid token");
         }
 
-        var username = principal.Claims.FirstOrDefault(c => c.Type.Equals(JwtRegisteredClaimNames.UniqueName))?.Value;
-        var user = await _userManager.FindByNameAsync(username);
+        var username = principal.Identity?.Name;
+        var user = await _userManager.Users
+            .Include(u => u.RefreshTokens)
+            .SingleOrDefaultAsync(u => u.UserName == username);
         if (user == null)
         {
             _logger.LogError("User not found");
@@ -58,15 +63,17 @@ public class TokenController : ControllerBase
             return BadRequest("Invalid or expired refresh token");
         }
 
-        var newJwt = _tokenService.GenerateJwtToken(user);
+        var newJwt = await _tokenService.GenerateJwtToken(user);
         var newRefreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
 
         refreshToken.Revoked = DateTime.UtcNow;
         refreshToken.RevokedByIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         user.RefreshTokens.Add(newRefreshToken);
-        await _userManager.UpdateAsync(user);
-
+        // await _userManager.UpdateAsync(user);
+        _dbContext.Update(user);
+        await _dbContext.SaveChangesAsync();
+        
         return Ok(new
         {
             token = newJwt,

@@ -95,8 +95,8 @@ public class AuthController : ControllerBase
             {
                 throw new Exception("Invalid JWT!");
             }
-
-            var username = principal.Claims.FirstOrDefault(c => c.Type.Equals(JwtRegisteredClaimNames.UniqueName))?.Value;
+            
+            var username = principal.Identity?.Name;
             if (string.IsNullOrEmpty(username))
             {
                 throw new Exception("Invalid identity!");

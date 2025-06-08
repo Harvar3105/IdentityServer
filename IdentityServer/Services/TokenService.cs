@@ -52,7 +52,7 @@ public class TokenService : ITokenService
         var claims = new List<Claim>
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName!)
+            new Claim(ClaimTypes.Name, user.UserName!)
         };
 
         foreach (var role in await _userManager.GetRolesAsync(user))
