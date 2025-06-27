@@ -57,7 +57,7 @@ var twp = new TokenValidationParameters
     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
         builder.Configuration.GetValue<string>("Security:JWTSecret")!
     )),
-    ClockSkew = TimeSpan.Zero
+    ClockSkew = TimeSpan.FromMinutes(1)
 };
 builder.Services.AddSingleton(twp);
 
@@ -91,7 +91,10 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 app.UseRouting();
+
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers(); 
 
 app.UseHttpsRedirection();
