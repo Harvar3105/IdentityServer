@@ -78,7 +78,7 @@ public class AuthController : ControllerBase
         {
             return await LoginByEmail(model);
         }
-        else if (model.JWT != null)
+        else if (model.Jwt != null)
         {
             return await LoginWithJWT(model);
         }
@@ -90,7 +90,7 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var principal = _tokenService.GetPrincipalFromExpiredToken(model.JWT);
+            var principal = _tokenService.GetPrincipalFromExpiredToken(model.Jwt);
             if (principal == null)
             {
                 throw new Exception("Invalid JWT!");
@@ -117,7 +117,7 @@ public class AuthController : ControllerBase
                 Username = user.UserName,
                 Email = user.Email,
                 Roles = roles.ToList(),
-                JWT = model.JWT,
+                Jwt = model.Jwt,
                 RefreshToken = null
             });
         }
@@ -161,7 +161,7 @@ public class AuthController : ControllerBase
             Username = user.UserName,
             Email = user.Email,
             Roles = roles.ToList(),
-            JWT = newJwt,
+            Jwt = newJwt,
             RefreshToken = newRefreshToken.Token
         };
     }
@@ -212,7 +212,7 @@ public class AuthController : ControllerBase
             Username = user.UserName,
             Email = user.Email,
             Roles = userRoles.ToList(),
-            JWT = jwt,
+            Jwt = jwt,
             RefreshToken = refreshToken.Token
         };
         return Ok(data);
@@ -230,11 +230,11 @@ public class DataModel
     public string? Email { get; set; }
     public ICollection<string>? Roles { get; set; }
     
-    public string? JWT { get; set; }
+    public string? Jwt { get; set; }
     public string? RefreshToken { get; set; }
 
     public override string ToString()
     {
-        return $"{Username}\n{FirstName}\n{LastName}\n{Password}\n{Email}\n{RefreshToken}\n{JWT}";
+        return $"{Username}\n{FirstName}\n{LastName}\n{Password}\n{Email}\n{RefreshToken}\n{Jwt}";
     }
 }

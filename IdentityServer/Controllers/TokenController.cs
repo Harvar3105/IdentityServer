@@ -30,14 +30,14 @@ public class TokenController : ControllerBase
     public async Task<IActionResult> RefreshToken([FromBody] DataModel model)
     {
         _logger.LogInformation("Refreshing token");
-        if (string.IsNullOrEmpty(model.JWT) || string.IsNullOrEmpty(model.RefreshToken))
+        if (string.IsNullOrEmpty(model.Jwt) || string.IsNullOrEmpty(model.RefreshToken))
         {
             _logger.LogError("JWT or Refresh Token is missing");
             return BadRequest("JWT or Refresh Token is missing");
         }
             
 
-        var principal = _tokenService.GetPrincipalFromExpiredToken(model.JWT);
+        var principal = _tokenService.GetPrincipalFromExpiredToken(model.Jwt);
         if (principal == null)
         {
             _logger.LogError("Invalid token");
