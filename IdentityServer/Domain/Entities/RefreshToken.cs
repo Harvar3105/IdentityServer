@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IdentityServer.Entities;
 
 public class RefreshToken
@@ -11,6 +13,8 @@ public class RefreshToken
   public string? RevokedByIp { get; set; }
   public string? ReplacedByTokenHash { get; set; }
   public Guid UserId { get; set; }
+  [JsonIgnore]
+  public User User { get; set; } = null!;
   public bool IsExpired => DateTime.UtcNow >= ExpiresAt;
   public bool IsActive => RevokedAt == null && !IsExpired;
 }

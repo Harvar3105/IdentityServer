@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
+using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using IdentityServer.Services;
@@ -46,11 +47,8 @@ public class AuthController : ControllerBase
     var result = await _userManager.CreateAsync(user, model.Password);
     if (!result.Succeeded) return BadRequest(result.Errors);
 
-    var jwt = _tokenService.GenerateJwtToken(user);
     var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-
     user.RefreshTokens.Add(refreshToken.entity);
-    await _userManager.UpdateAsync(user);
     await _userManager.AddToRoleAsync(user, "User");
 
     if (model.Roles != null && model.Roles.Any())
@@ -61,13 +59,11 @@ public class AuthController : ControllerBase
       }
     }
 
+    await _userManager.UpdateAsync(user);
     await _dbContext.SaveChangesAsync();
 
-    return Ok(new
-    {
-      token = jwt,
-      refreshToken = refreshToken.token
-    });
+    var jwt = await _tokenService.GenerateJwtToken(user);
+    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = jwt, RefreshToken = refreshToken.token});
   }
 
   [HttpPost("login")]
@@ -76,22 +72,23 @@ public class AuthController : ControllerBase
     try
     {
       if (model.Username != null)
-    {
-      return await LoginByUsername(model);
-    }
-    else if (model.Email != null)
-    {
-      return await LoginByEmail(model);
-    }
-    else if (model.Jwt != null)
-    {
-      return await LoginWithJWT(model);
-    }
+      {
+        return await LoginByUsername(model);
+      }
+      else if (model.Email != null)
+      {
+        return await LoginByEmail(model);
+      }
+      else if (model.Jwt != null)
+      {
+        return await LoginWithJWT(model);
+      }
 
-    return BadRequest("Could not find suitable auth method!");
-    } catch (Exception ex)
+      return BadRequest("Could not find suitable auth method!");
+    }
+    catch (Exception ex)
     {
-      return BadRequest(new {Fail = "❌Could not login!", Reason = ex.Message});
+      return BadRequest(new { Fail = "❌Could not login!", Reason = ex.Message });
     }
   }
 
@@ -120,7 +117,7 @@ public class AuthController : ControllerBase
       }
 
       var roles = await _userManager.GetRolesAsync(user);
-      return Ok(new {User = user, Roles = roles});
+      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = roles});
     }
     catch (Exception ex)
     {
@@ -180,14 +177,14 @@ public class AuthController : ControllerBase
     var result = await _signInManager.PasswordSignInAsync(user, password, false, false);
     if (!result.Succeeded)
       return Unauthorized("Invalid credentials");
-    
+
     var userRoles = await _userManager.GetRolesAsync(user);
 
     var rt = _dbContext.RefreshTokens
       .Where(ut => ut.UserId.Equals(user.Id))
       .OrderByDescending(ut => ut.CreatedAt)
       .FirstOrDefault();
-    
+
     if (rt == null)
     {
       var jwt = await _tokenService.GenerateJwtToken(user);
@@ -195,23 +192,11 @@ public class AuthController : ControllerBase
       user.RefreshTokens.Add(refreshToken.entity);
       await _userManager.UpdateAsync(user);
 
-      return Ok(new
-      {
-        User = user,
-        Roles = userRoles,
-        Jwt = jwt,
-        RefreshToken = refreshToken.token
-      });
+      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = jwt, RefreshToken = refreshToken.token});
     }
-    
+
     var tokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-    return Ok(new
-    {
-      User = user,
-      Roles = userRoles,
-      Jwt = tokens.token,
-      RefreshToken = tokens.refreshToken
-    });
+    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = tokens.token, RefreshToken = tokens.refreshToken});
   }
 
 }

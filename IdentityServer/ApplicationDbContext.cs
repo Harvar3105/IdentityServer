@@ -13,17 +13,26 @@ public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClai
   {
   }
 
-  public DbSet<User> Users { get; set; }
-  public DbSet<Role> Roles { get; set; }
-  public DbSet<UserClaim> UserClaims { get; set; }
   public DbSet<RefreshToken> RefreshTokens { get; set; }
-  // public DbSet<IdentityUserRole<Guid>> IdentityUserRoles { get; set; }
 
   protected override void OnModelCreating(ModelBuilder builder)
   {
-    builder.Entity<User>(entity =>
-      {
-        entity.Ignore(u => u.RefreshTokens);
-      });
+    base.OnModelCreating(builder);
+
+    builder.Entity<User>()
+      .HasMany(u => u.RefreshTokens)
+      .WithOne(rt => rt.User)
+      .HasForeignKey(rt => rt.UserId)
+      .OnDelete(DeleteBehavior.Cascade);
+
+    builder.Entity<IdentityUserLogin<Guid>>(b =>
+    {
+      b.HasKey(l => new { l.LoginProvider, l.ProviderKey });
+    });
+
+    builder.Entity<IdentityUserToken<Guid>>(b =>
+    {
+      b.HasKey(t => new { t.UserId, t.LoginProvider, t.Name });
+    });
   }
 }

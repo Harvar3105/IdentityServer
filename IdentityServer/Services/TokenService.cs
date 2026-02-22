@@ -66,12 +66,13 @@ public class TokenService : ITokenService
     try
     {
       principal = _tokenHandler.ValidateToken(token, validationParams, out validatedToken);
-    } catch (Exception ex)
+    }
+    catch (Exception ex)
     {
       _logger.LogError("💥Token validation failed: {Message}", ex.Message);
       return null;
     }
-    
+
 
     if (validatedToken is not JwtSecurityToken jwtToken ||
       !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
@@ -112,7 +113,7 @@ public class TokenService : ITokenService
     await _dbContext.SaveChangesAsync();
 
     return (newJwt, newRefreshToken.token);
-  } 
+  }
 
   public async Task RevokeRTToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
   {

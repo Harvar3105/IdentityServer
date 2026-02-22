@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
@@ -67,11 +68,7 @@ public class TokenController : ControllerBase
 
     var result = await _tokenService.RefreshTokens(user, refreshTokenHash, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
 
-    return Ok(new
-    {
-      token = result.token,
-      refreshToken = result.refreshToken
-    });
+    return Ok(new ResponseDTO{AccessToken = result.token, RefreshToken = result.refreshToken});
   }
 
   [HttpPost("validate")]
@@ -84,8 +81,9 @@ public class TokenController : ControllerBase
       {
         return BadRequest(new { valid = false, error = "Invalid token" });
       }
-      return Ok(new { valid = true });
-    } catch (Exception ex)
+      return Ok(new ResponseDTO { IsAaccessTokenValid = true });
+    }
+    catch (Exception ex)
     {
       return BadRequest(new { valid = false, error = ex.Message });
     }
