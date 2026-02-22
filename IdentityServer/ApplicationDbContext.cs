@@ -1,4 +1,4 @@
-﻿using IdentityServer.Entities;
+using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -6,16 +6,24 @@ using Microsoft.EntityFrameworkCore;
 namespace IdentityServer;
 
 public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClaim, IdentityUserRole<Guid>,
-    IdentityUserLogin<Guid>, IdentityRoleClaim<Guid>, IdentityUserToken<Guid>>
+  IdentityUserLogin<Guid>, IdentityRoleClaim<Guid>, IdentityUserToken<Guid>>
 {
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-        : base(options)
-    {
-    }
+  public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+    : base(options)
+  {
+  }
 
-    public DbSet<User> Users { get; set; }
-    public DbSet<Role> Roles { get; set; }
-    public DbSet<UserClaim> UserClaims { get; set; }
-    public DbSet<RefreshToken> RefreshTokens { get; set; }
-    public DbSet<IdentityUserRole<Guid>> IdentityUserRoles { get; set; }
+  public DbSet<User> Users { get; set; }
+  public DbSet<Role> Roles { get; set; }
+  public DbSet<UserClaim> UserClaims { get; set; }
+  public DbSet<RefreshToken> RefreshTokens { get; set; }
+  // public DbSet<IdentityUserRole<Guid>> IdentityUserRoles { get; set; }
+
+  protected override void OnModelCreating(ModelBuilder builder)
+  {
+    builder.Entity<User>(entity =>
+      {
+        entity.Ignore(u => u.RefreshTokens);
+      });
+  }
 }

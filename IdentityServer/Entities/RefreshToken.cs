@@ -1,17 +1,16 @@
-﻿namespace IdentityServer.Entities;
+namespace IdentityServer.Entities;
 
 public class RefreshToken
 {
-    public Guid Id { get; set; }
-    public string Token { get; set; } = Guid.NewGuid().ToString();
-    public DateTime Expires { get; set; }
-    public bool IsExpired => DateTime.UtcNow >= Expires;
-    public DateTime Created { get; set; } = DateTime.UtcNow;
-    public string? CreatedByIp { get; set; }
-    public string? RevokedByIp { get; set; }
-    public DateTime? Revoked { get; set; }
-    public bool IsActive => Revoked == null && !IsExpired;
-
-    public string UserId { get; set; }
-    public User User { get; set; }
+  public Guid Id { get; set; }
+  public string TokenHash { get; set; } = null!;
+  public DateTime ExpiresAt { get; set; }
+  public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+  public string? CreatedByIp { get; set; }
+  public DateTime? RevokedAt { get; set; }
+  public string? RevokedByIp { get; set; }
+  public string? ReplacedByTokenHash { get; set; }
+  public Guid UserId { get; set; }
+  public bool IsExpired => DateTime.UtcNow >= ExpiresAt;
+  public bool IsActive => RevokedAt == null && !IsExpired;
 }

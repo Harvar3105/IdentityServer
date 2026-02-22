@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,95 +11,119 @@ namespace IdentityServer.Services;
 
 public class TokenService : ITokenService
 {
-    private readonly IConfiguration _config;
-    private readonly TokenValidationParameters _twp;
-    private readonly JwtSecurityTokenHandler _tokenHandler = new();
-    private readonly UserManager<User> _userManager;
+  private readonly IConfiguration _config;
+  private readonly TokenValidationParameters _twp;
+  private readonly JwtSecurityTokenHandler _tokenHandler = new();
+  private readonly UserManager<User> _userManager;
+  private readonly ApplicationDbContext _dbContext;
+  private readonly ILogger<TokenService> _logger;
 
-    public TokenService(IConfiguration config, TokenValidationParameters twp, UserManager<User> userManager)
+  public TokenService(IConfiguration config, TokenValidationParameters twp, UserManager<User> userManager, ApplicationDbContext dbContext, ILogger<TokenService> logger)
+  {
+    _config = config;
+    _twp = twp;
+    _userManager = userManager;
+    _dbContext = dbContext;
+    _logger = logger;
+  }
+
+  public async Task<string> GenerateJwtToken(User user)
+  {
+    var claims = new List<Claim>
     {
-        _config = config;
-        _twp = twp;
-        _userManager = userManager;
+      new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+      new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+      new Claim(ClaimTypes.Name, user.UserName!),
+      new Claim("security_stamp", user.SecurityStamp ?? string.Empty)
+    };
+
+    var roles = await _userManager.GetRolesAsync(user);
+    claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+
+    var key = _twp.IssuerSigningKey;
+    var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+    var expires = DateTime.UtcNow.AddMinutes(_config.GetValue<int>("Security:JWTExpiration"));
+
+    var token = new JwtSecurityToken(
+      issuer: _twp.ValidIssuer,
+      audience: _twp.ValidAudience,
+      claims: claims,
+      expires: expires,
+      signingCredentials: creds
+    );
+
+    return new JwtSecurityTokenHandler().WriteToken(token);
+  }
+
+  public ClaimsPrincipal? ValidateToken(string token, bool validateLifetime = true)
+  {
+    var validationParams = _twp.Clone();
+    validationParams.ValidateLifetime = validateLifetime;
+
+    ClaimsPrincipal principal;
+    SecurityToken validatedToken;
+    try
+    {
+      principal = _tokenHandler.ValidateToken(token, validationParams, out validatedToken);
+    } catch (Exception ex)
+    {
+      _logger.LogError("💥Token validation failed: {Message}", ex.Message);
+      return null;
     }
     
-    public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
+
+    if (validatedToken is not JwtSecurityToken jwtToken ||
+      !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
     {
-        var tokenHandler = new JwtSecurityTokenHandler();
-
-        var validationParameters = _twp.Clone();
-        validationParameters.ValidateLifetime = false;
-
-        try
-        {
-            var principal = tokenHandler.ValidateToken(token, validationParameters, out var securityToken);
-            if (securityToken is not JwtSecurityToken jwtToken ||
-                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
-            {
-                throw new SecurityTokenException("Invalid token");
-            }
-
-            return principal;
-        }
-        catch
-        {
-            return null;
-        }
+      return null;
     }
 
-    public async Task<string> GenerateJwtToken(User user)
+    return principal;
+  }
+
+  public (string token, RefreshToken entity) GenerateRefreshToken(string ipAddress, User user)
+  {
+    var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+    var hash = HashToken(rawToken);
+
+
+    var entity = new RefreshToken
     {
-        var claims = new List<Claim>
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.UserName!)
-        };
+      UserId = user.Id,
+      TokenHash = hash,
+      CreatedAt = DateTime.UtcNow,
+      CreatedByIp = ipAddress,
+      ExpiresAt = DateTime.UtcNow.AddDays(_config.GetValue<int>("Security:RTExpiration"))
+    };
 
-        foreach (var role in await _userManager.GetRolesAsync(user))
-        {
-            claims.Add(new Claim(ClaimTypes.Role, role));
-        }
+    return (rawToken, entity);
+  }
 
-        var key = _twp.IssuerSigningKey;
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+  public async Task<(string token, string refreshToken)> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
+  {
+    var newJwt = await GenerateJwtToken(user);
+    var newRefreshToken = GenerateRefreshToken(ipAddress, user);
 
-        var token = new JwtSecurityToken(
-            issuer: _twp.ValidIssuer,
-            audience: _twp.ValidAudience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(double.Parse(_config["Security:JWTExpiration"]!)),
-            signingCredentials: creds);
+    await RevokeRTToken(newRefreshToken.entity, oldToken, ipAddress);
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
+    user.RefreshTokens.Add(newRefreshToken.entity);
+    _dbContext.Update(user);
+    await _dbContext.SaveChangesAsync();
 
-    public (bool, dynamic) ValidateToken(string token)
-    {
-        try
-        {
-            _tokenHandler.ValidateToken(token, _twp, out SecurityToken validatedToken);
+    return (newJwt, newRefreshToken.token);
+  } 
 
-            var jwtToken = (JwtSecurityToken)validatedToken;
-            var claims = jwtToken.Claims.ToDictionary(c => c.Type, c => c.Value);
+  public async Task RevokeRTToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
+  {
+    oldToken.RevokedAt = DateTime.UtcNow;
+    oldToken.RevokedByIp = ipAddress;
+    oldToken.ReplacedByTokenHash = newToken.TokenHash;
+    _dbContext.Update(oldToken);
+  }
 
-            return (true, claims);
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
-    }
-
-    public RefreshToken GenerateRefreshToken(string ipAddress, User user)
-    {
-        return new RefreshToken
-        {
-            UserId = user.Id.ToString(),
-            User = user,
-            Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
-            Expires = DateTime.UtcNow.AddDays(double.Parse(_config["Security:RTExpiration"]!)),
-            Created = DateTime.UtcNow,
-            CreatedByIp = ipAddress
-        };
-    }
+  public string HashToken(string token)
+  {
+    return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+  }
 }
