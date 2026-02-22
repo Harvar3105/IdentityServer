@@ -43,12 +43,20 @@ public class TokenController : ControllerBase
       return BadRequest("Invalid token");
     }
 
-    var user = await _userManager.GetUserAsync(principal);
-    if (user == null)
+    var userId = _userManager.GetUserId(principal);
+    if (userId == null)
     {
+      _logger.LogError("💥UserId not found");
+      return BadRequest("UserId not found");
+    }
+
+    var user = await _dbContext.Users
+      .Include(u => u.RefreshTokens)
+      .FirstOrDefaultAsync(u => u.Id.Equals(Guid.Parse(userId)));
+    if (user == null){
       _logger.LogError("💥User not found");
       return BadRequest("User not found");
-    }
+    };
 
     var securityStampClaim = principal.FindFirst("security_stamp")?.Value;
     if (securityStampClaim == null || securityStampClaim != user.SecurityStamp)

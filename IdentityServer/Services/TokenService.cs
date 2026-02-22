@@ -88,7 +88,6 @@ public class TokenService : ITokenService
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
 
-
     var entity = new RefreshToken
     {
       UserId = user.Id,
