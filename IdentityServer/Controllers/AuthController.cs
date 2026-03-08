@@ -98,7 +98,7 @@ public class AuthController : ControllerBase
         var login = await TryLoginWithRefreshToken(model.RefreshTokenHash!);
         if (login != null) return Ok(new
         {
-          User = login.Value.User,
+          User = new UserDTO(login.Value.User),
           Roles = login.Value.Roles,
           AccessToken = login.Value.NewJwt,
           RefreshToken = login.Value.NewRt
@@ -123,18 +123,16 @@ public class AuthController : ControllerBase
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
   {
-    var rthash = _tokenService.HashToken(refreshToken);
-    var user = await _userManager.Users
-      .Where(u => u.RefreshTokens.Any(rt =>
-        rt.TokenHash.Equals(rthash) &&
-        rt.IsActive))
-      .FirstOrDefaultAsync();
+    var rtEntity = await _dbContext.RefreshTokens
+      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshToken) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
+    if (rtEntity == null) return null;
+    var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(rtEntity.UserId));
     if (user == null) return null;
 
     var newTokens = await _tokenService.RefreshTokens
     (
       user,
-      user.RefreshTokens.First(rt => rt.TokenHash.Equals(rthash) && rt.IsActive),
+      rtEntity,
       HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
     );
 
