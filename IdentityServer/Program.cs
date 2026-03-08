@@ -3,6 +3,7 @@ using System.Text;
 using IdentityServer;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
+using IdentityServer.Middleware;
 using IdentityServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -84,6 +85,7 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
+  app.UseMiddleware<RequestLoggingMiddleware>();
   app.MapOpenApi();
 }
 
