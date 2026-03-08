@@ -75,9 +75,9 @@ public class AuthController : ControllerBase
       {
         return await LoginByEmail(model);
       }
-      else if (model.AccessToken != null)
+      else if (model.AccessToken != null || model.RefreshTokenHash != null)
       {
-        return await LoginWithAccessToken(model);
+        return await LoginWithTokens(model);
       }
 
       return BadRequest("Could not find suitable auth method!");
@@ -88,7 +88,7 @@ public class AuthController : ControllerBase
     }
   }
 
-  private async Task<IActionResult> LoginWithAccessToken(DataModel model)
+  private async Task<IActionResult> LoginWithTokens(DataModel model)
   {
     try
     {
@@ -100,8 +100,8 @@ public class AuthController : ControllerBase
         {
           User = login.Value.User,
           Roles = login.Value.Roles,
-          jwt = login.Value.NewJwt,
-          rt = login.Value.NewRt
+          AccessToken = login.Value.NewJwt,
+          RefreshToken = login.Value.NewRt
         });
         throw new Exception("Invalid JWT!");
       }
