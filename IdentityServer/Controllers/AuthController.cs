@@ -1,10 +1,6 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Cryptography;
-using System.Text;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
-using IdentityServer.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -48,7 +44,7 @@ public class AuthController : ControllerBase
     if (!result.Succeeded) return BadRequest(result.Errors);
 
     var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-    user.RefreshTokens.Add(refreshToken.entity);
+    user.RefreshTokens.Add(refreshToken);
     await _userManager.AddToRoleAsync(user, "User");
 
     if (model.Roles != null && model.Roles.Any())
@@ -62,8 +58,8 @@ public class AuthController : ControllerBase
     await _userManager.UpdateAsync(user);
     await _dbContext.SaveChangesAsync();
 
-    var jwt = await _tokenService.GenerateJwtToken(user);
-    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = jwt, RefreshToken = refreshToken.token});
+    var accessToken = await _tokenService.GenerateAccessToken(user);
+    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
   }
 
   [HttpPost("login")]
@@ -79,9 +75,9 @@ public class AuthController : ControllerBase
       {
         return await LoginByEmail(model);
       }
-      else if (model.Jwt != null)
+      else if (model.AccessToken != null)
       {
-        return await LoginWithJWT(model);
+        return await LoginWithAccessToken(model);
       }
 
       return BadRequest("Could not find suitable auth method!");
@@ -92,14 +88,14 @@ public class AuthController : ControllerBase
     }
   }
 
-  private async Task<IActionResult> LoginWithJWT(DataModel model)
+  private async Task<IActionResult> LoginWithAccessToken(DataModel model)
   {
     try
     {
-      var principal = _tokenService.ValidateToken(model.Jwt!);
+      var principal = _tokenService.ValidateAccessToken(model.AccessToken!);
       if (principal == null)
       {
-        var login = await TryLoginWithRefreshToken(model.RefreshToken!);
+        var login = await TryLoginWithRefreshToken(model.RefreshTokenHash!);
         if (login != null) return Ok(new
         {
           User = login.Value.User,
@@ -187,12 +183,12 @@ public class AuthController : ControllerBase
 
     if (rt == null)
     {
-      var jwt = await _tokenService.GenerateJwtToken(user);
+      var accessToken = await _tokenService.GenerateAccessToken(user);
       var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-      user.RefreshTokens.Add(refreshToken.entity);
+      user.RefreshTokens.Add(refreshToken);
       await _userManager.UpdateAsync(user);
 
-      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = jwt, RefreshToken = refreshToken.token});
+      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
     }
 
     var tokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
@@ -209,11 +205,11 @@ public class DataModel
   public string? Email { get; set; }
   public ICollection<string>? Roles { get; set; }
 
-  public string? Jwt { get; set; }
-  public string? RefreshToken { get; set; }
+  public string? AccessToken { get; set; }
+  public string? RefreshTokenHash { get; set; }
 
   public override string ToString()
   {
-    return $"{Username}\n{Password}\n{Email}\n{RefreshToken}\n{Jwt}";
+    return $"{Username}\n{Password}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
   }
 }

@@ -27,7 +27,7 @@ public class TokenService : ITokenService
     _logger = logger;
   }
 
-  public async Task<string> GenerateJwtToken(User user)
+  public async Task<string> GenerateAccessToken(User user)
   {
     var claims = new List<Claim>
     {
@@ -56,7 +56,7 @@ public class TokenService : ITokenService
     return new JwtSecurityTokenHandler().WriteToken(token);
   }
 
-  public ClaimsPrincipal? ValidateToken(string token, bool validateLifetime = true)
+  public ClaimsPrincipal? ValidateAccessToken(string token, bool validateLifetime = true)
   {
     var validationParams = _twp.Clone();
     validationParams.ValidateLifetime = validateLifetime;
@@ -83,7 +83,7 @@ public class TokenService : ITokenService
     return principal;
   }
 
-  public (string token, RefreshToken entity) GenerateRefreshToken(string ipAddress, User user)
+  public RefreshToken GenerateRefreshToken(string ipAddress, User user)
   {
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
@@ -97,24 +97,24 @@ public class TokenService : ITokenService
       ExpiresAt = DateTime.UtcNow.AddDays(_config.GetValue<int>("Security:RTExpiration"))
     };
 
-    return (rawToken, entity);
+    return entity;
   }
 
   public async Task<(string token, string refreshToken)> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
-    var newJwt = await GenerateJwtToken(user);
+    var newAccessToken = await GenerateAccessToken(user);
     var newRefreshToken = GenerateRefreshToken(ipAddress, user);
 
-    await RevokeRTToken(newRefreshToken.entity, oldToken, ipAddress);
+    await RevokeRefreshToken(newRefreshToken, oldToken, ipAddress);
 
-    user.RefreshTokens.Add(newRefreshToken.entity);
+    user.RefreshTokens.Add(newRefreshToken);
     _dbContext.Update(user);
     await _dbContext.SaveChangesAsync();
 
-    return (newJwt, newRefreshToken.token);
+    return (newAccessToken, newRefreshToken.TokenHash);
   }
 
-  public async Task RevokeRTToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
+  public async Task RevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
   {
     oldToken.RevokedAt = DateTime.UtcNow;
     oldToken.RevokedByIp = ipAddress;

@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
@@ -30,53 +28,32 @@ public class TokenController : ControllerBase
   public async Task<IActionResult> RefreshJWTToken([FromBody] DataModel model)
   {
     _logger.LogInformation("⚠️Refreshing token");
-    if (string.IsNullOrEmpty(model.Jwt) || string.IsNullOrEmpty(model.RefreshToken))
+    if (string.IsNullOrEmpty(model.RefreshTokenHash))
     {
-      _logger.LogError("💥JWT or Refresh Token is missing");
-      return BadRequest("JWT or Refresh Token is missing");
+      _logger.LogError("💥Refresh Token is missing");
+      return BadRequest("Refresh Token is missing");
     }
 
-    var principal = _tokenService.ValidateToken(model.Jwt, false);
-    if (principal == null)
-    {
-      _logger.LogError("💥Invalid token");
-      return BadRequest("Invalid token");
-    }
+    var now = DateTime.UtcNow;
+    var refreshToken = await _dbContext.RefreshTokens
+      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(model.RefreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > now);
 
-    var userId = _userManager.GetUserId(principal);
-    if (userId == null)
-    {
-      _logger.LogError("💥UserId not found");
-      return BadRequest("UserId not found");
-    }
-
-    var user = await _dbContext.Users
-      .Include(u => u.RefreshTokens)
-      .FirstOrDefaultAsync(u => u.Id.Equals(Guid.Parse(userId)));
-    if (user == null){
-      _logger.LogError("💥User not found");
-      return BadRequest("User not found");
-    };
-
-    var securityStampClaim = principal.FindFirst("security_stamp")?.Value;
-    if (securityStampClaim == null || securityStampClaim != user.SecurityStamp)
-    {
-      return BadRequest("💥Token invalid due to security stamp mismatch");
-    }
-
-    var tokenHash = _tokenService.HashToken(model.RefreshToken);
-    var refreshTokenHash = user.RefreshTokens.FirstOrDefault(rt =>
-        rt.TokenHash.Equals(tokenHash) && rt.IsActive);
-
-    if (refreshTokenHash == null)
+    if (refreshToken == null)
     {
       _logger.LogError("💥Invalid or expired refresh token");
       return BadRequest("Invalid or expired refresh token");
     }
 
-    var result = await _tokenService.RefreshTokens(user, refreshTokenHash, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(refreshToken.UserId));
+    if (user == null)
+    {
+      _logger.LogError("💥User not found for refresh token");
+      return BadRequest("User not found");
+    }
 
-    return Ok(new ResponseDTO{AccessToken = result.token, RefreshToken = result.refreshToken});
+    var result = await _tokenService.RefreshTokens(user, refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+    return Ok(new ResponseDTO { AccessToken = result.token, RefreshToken = result.refreshToken });
   }
 
   [HttpPost("validate")]
@@ -84,7 +61,7 @@ public class TokenController : ControllerBase
   {
     try
     {
-      var principal = _tokenService.ValidateToken(token);
+      var principal = _tokenService.ValidateAccessToken(token);
       if (principal == null)
       {
         return BadRequest(new { valid = false, error = "Invalid token" });
