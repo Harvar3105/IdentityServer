@@ -8,6 +8,7 @@ using IdentityServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,12 +16,12 @@ var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
 {
   builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
-      .AddJsonFile("appsettings.Development.json", optional: false, reloadOnChange: true);
+    .AddJsonFile("appsettings.Development.json", optional: false, reloadOnChange: true);
 }
 else
 {
   builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
-      .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 }
 builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddOpenApi();
@@ -32,16 +33,16 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddIdentity<User, Role>(options =>
-    {
-      options.Password.RequireDigit = true;
-      options.Password.RequireLowercase = true;
-      options.Password.RequireNonAlphanumeric = false;
-      options.Password.RequireUppercase = true;
-      options.Password.RequiredLength = 4;
-      options.Password.RequiredUniqueChars = 0;
-    })
-    .AddEntityFrameworkStores<ApplicationDbContext>()
-    .AddDefaultTokenProviders();
+  {
+    options.Password.RequireDigit = true;
+    options.Password.RequireLowercase = true;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = true;
+    options.Password.RequiredLength = 4;
+    options.Password.RequiredUniqueChars = 0;
+  })
+  .AddEntityFrameworkStores<ApplicationDbContext>()
+  .AddDefaultTokenProviders();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 
@@ -80,6 +81,14 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+builder.Configuration.AddJsonFile(
+  "Seed/seedsettings.json",
+  optional: false,
+  reloadOnChange: false
+);
+builder.Services.Configure<SeedSettings>(
+  builder.Configuration.GetSection("Seed")
+);
 
 var app = builder.Build();
 
@@ -120,54 +129,34 @@ static void SetupAppData(WebApplication app)
     context.Database.Migrate();
   }
 
-
   using var userManager = serviceScope.ServiceProvider.GetRequiredService<UserManager<User>>();
   using var roleManager = serviceScope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+  var seedSettings = serviceScope.ServiceProvider
+    .GetRequiredService<IOptions<SeedSettings>>()
+    .Value;
 
-  var res = roleManager.CreateAsync(new Role()
+  string[] roles = seedSettings.Projects.Select(p => p.Roles).SelectMany(r => r.Admin.Concat(r.User)).Distinct().ToArray();
+  foreach (var role in roles)
   {
-    Name = "Admin"
-  }).Result;
-
-  if (!res.Succeeded)
-  {
-    Console.WriteLine(res.ToString());
+    var result = roleManager.CreateAsync(new Role()
+    {
+      Name = role
+    }).Result;
+    if (!result.Succeeded) Console.WriteLine(result.ToString());
   }
 
-  var res2 = roleManager.CreateAsync(new Role()
+  foreach (var user in seedSettings.Users)
   {
-    Name = "User"
-  }).Result;
+    var parsed = new User()
+    {
+      Email = user.Email,
+      UserName = user.Username,
+    };
 
-  if (!res2.Succeeded)
-  {
-    Console.WriteLine(res2.ToString());
-  }
+    var registration = userManager.CreateAsync(parsed, user.Password).Result;
+    if (!registration.Succeeded) Console.WriteLine(registration.ToString());
 
-  var user = new User()
-  {
-    Email = "admin@eesti.ee",
-    UserName = "admin",
-  };
-  res = userManager.CreateAsync(user, "Kala.maja1").Result;
-  if (!res.Succeeded)
-  {
-    Console.WriteLine(res.ToString());
-  }
-  var user2 = new User()
-  {
-    Email = "bob@eesti.ee",
-    UserName = "bob",
-  };
-  res = userManager.CreateAsync(user2, "Kala.maja2").Result;
-  if (!res.Succeeded)
-  {
-    Console.WriteLine(res.ToString());
-  }
-
-  res = userManager.AddToRoleAsync(user, "Admin").Result;
-  if (!res.Succeeded)
-  {
-    Console.WriteLine(res.ToString());
+    registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
+    if (!registration.Succeeded) Console.WriteLine(registration.ToString());
   }
 }

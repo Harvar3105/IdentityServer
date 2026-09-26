@@ -34,7 +34,6 @@ public class TokenService : ITokenService
       new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
       new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
       new Claim(ClaimTypes.Name, user.UserName!),
-      new Claim("security_stamp", user.SecurityStamp ?? string.Empty)
     };
 
     var roles = await _userManager.GetRolesAsync(user);

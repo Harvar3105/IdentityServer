@@ -67,3 +67,6 @@ log/
 
 # Ignore generated files or temporary cache
 tmp/
+
+
+Seed/

@@ -1,9 +1,11 @@
+using Duende.IdentityServer.Extensions;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace IdentityServer.Controllers;
 
@@ -15,13 +17,15 @@ public class AuthController : ControllerBase
   private readonly SignInManager<User> _signInManager;
   private readonly ITokenService _tokenService;
   private readonly ApplicationDbContext _dbContext;
+  private readonly SeedSettings _projectsInfo;
 
-  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context)
+  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context, IOptions<SeedSettings> info)
   {
     _userManager = userManager;
     _signInManager = signInManager;
     _tokenService = tokenService;
     _dbContext = context;
+    _projectsInfo = info.Value;
   }
 
   [HttpPost("register")]
@@ -45,15 +49,12 @@ public class AuthController : ControllerBase
 
     var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     user.RefreshTokens.Add(refreshToken);
-    await _userManager.AddToRoleAsync(user, "User");
 
-    if (model.Roles != null && model.Roles.Any())
-    {
-      foreach (var role in model.Roles)
-      {
-        await _userManager.AddToRoleAsync(user, role);
-      }
-    }
+    var projKey = Request.Headers["Project"].FirstOrDefault();
+    if (projKey.IsNullOrEmpty()) return BadRequest("Request source is not detected!");
+    
+    var role = _projectsInfo.GetInitialRole(projKey);
+    if (role != null) await _userManager.AddToRoleAsync(user, role);    
 
     await _userManager.UpdateAsync(user);
     await _dbContext.SaveChangesAsync();
