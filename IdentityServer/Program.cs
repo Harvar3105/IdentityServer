@@ -138,6 +138,9 @@ static void SetupAppData(WebApplication app)
   string[] roles = seedSettings.Projects.Select(p => p.Roles).SelectMany(r => r.Admin.Concat(r.User)).Distinct().ToArray();
   foreach (var role in roles)
   {
+    var exists = roleManager.FindByNameAsync(role).Result;
+    if (exists is not null) continue;
+
     var result = roleManager.CreateAsync(new Role()
     {
       Name = role
@@ -153,10 +156,20 @@ static void SetupAppData(WebApplication app)
       UserName = user.Username,
     };
 
-    var registration = userManager.CreateAsync(parsed, user.Password).Result;
-    if (!registration.Succeeded) Console.WriteLine(registration.ToString());
+    var existingUser = userManager.FindByEmailAsync(user.Email).Result;
 
-    registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
-    if (!registration.Succeeded) Console.WriteLine(registration.ToString());
+    if (existingUser is null)
+    {
+      var registration = userManager.CreateAsync(parsed, user.Password).Result;
+      if (!registration.Succeeded) Console.WriteLine(registration.ToString());
+      existingUser = userManager.FindByEmailAsync(parsed.Email).Result;
+    }
+    
+    var userRoles = userManager.GetRolesAsync(existingUser!).Result;
+    if (!userRoles.OrderBy(r => r).SequenceEqual(user.Roles.OrderBy(r => r)))
+    {
+      var registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
+      if (!registration.Succeeded) Console.WriteLine(registration.ToString());
+    }
   }
 }
