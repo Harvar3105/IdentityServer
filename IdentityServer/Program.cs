@@ -81,8 +81,12 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+if (builder.Environment.IsDevelopment())
+{
+  builder.Services.AddEndpointsApiExplorer();
+  builder.Services.AddSwaggerGen();
+}
 
 // FIXME: [Crit] Seed/ is git-ignored and no example file exists, so a fresh clone fails on startup here.
 builder.Configuration.AddJsonFile(
@@ -100,11 +104,9 @@ if (app.Environment.IsDevelopment())
 {
   app.UseMiddleware<RequestLoggingMiddleware>();
   app.MapOpenApi();
+  app.UseSwagger();
+  app.UseSwaggerUI();
 }
-
-// FIXME: [Crit] Swagger UI is exposed in every environment, including production.
-app.UseSwagger();
-app.UseSwaggerUI();
 
 app.UseRouting();
 
