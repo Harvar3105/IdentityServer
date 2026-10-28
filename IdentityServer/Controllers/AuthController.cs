@@ -127,20 +127,13 @@ public class AuthController : ControllerBase
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
   {
-    var refreshTokenHash = _tokenService.HashToken(refreshToken);
-    // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
-    var rtEntity = await _dbContext.RefreshTokens
-      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
+    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var rtEntity = await _tokenService.FindActiveRefreshToken(refreshToken, ipAddress);
     if (rtEntity == null) return null;
     var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(rtEntity.UserId));
     if (user == null) return null;
 
-    var newTokens = await _tokenService.RefreshTokens
-    (
-      user,
-      rtEntity,
-      HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
-    );
+    var newTokens = await _tokenService.RefreshTokens(user, rtEntity, ipAddress);
     if (newTokens == null) return null;
 
     var roles = await _userManager.GetRolesAsync(user);

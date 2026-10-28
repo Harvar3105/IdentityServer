@@ -103,6 +103,32 @@ public class TokenService : ITokenService
     return (entity, rawToken);
   }
 
+  public async Task<RefreshToken?> FindActiveRefreshToken(string rawToken, string ipAddress)
+  {
+    var tokenHash = HashToken(rawToken);
+    var refreshToken = await _dbContext.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
+    if (refreshToken == null) return null;
+
+    if (refreshToken.RevokedAt != null)
+    {
+      _logger.LogWarning("💥Revoked refresh token reused for user {UserId}; revoking all active refresh tokens", refreshToken.UserId);
+      await RevokeAllRefreshTokens(refreshToken.UserId, ipAddress);
+      return null;
+    }
+
+    return refreshToken.IsActive ? refreshToken : null;
+  }
+
+  public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
+  {
+    var revokedAt = DateTime.UtcNow;
+    await _dbContext.RefreshTokens
+      .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, revokedAt)
+        .SetProperty(rt => rt.RevokedByIp, ipAddress));
+  }
+
   public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
     var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user);

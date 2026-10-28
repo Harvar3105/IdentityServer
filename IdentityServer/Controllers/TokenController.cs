@@ -34,11 +34,8 @@ public class TokenController : ControllerBase
       return BadRequest("Refresh Token is missing");
     }
 
-    var now = DateTime.UtcNow;
-    var refreshTokenHash = _tokenService.HashToken(model.RefreshTokenHash);
-    // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
-    var refreshToken = await _dbContext.RefreshTokens
-      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > now);
+    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var refreshToken = await _tokenService.FindActiveRefreshToken(model.RefreshTokenHash, ipAddress);
 
     if (refreshToken == null)
     {
@@ -53,7 +50,7 @@ public class TokenController : ControllerBase
       return BadRequest("User not found");
     }
 
-    var result = await _tokenService.RefreshTokens(user, refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    var result = await _tokenService.RefreshTokens(user, refreshToken, ipAddress);
     if (result == null)
     {
       _logger.LogError("💥Refresh token was already used by a concurrent request");
