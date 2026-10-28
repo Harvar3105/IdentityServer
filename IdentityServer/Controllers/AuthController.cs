@@ -179,24 +179,10 @@ public class AuthController : ControllerBase
 
     var userRoles = await _userManager.GetRolesAsync(user);
 
-    // FIXME: [Crit] Rotates the user's latest refresh token regardless of its revoked/expired state;
-    // logging in on one device revokes the session of another. Each login must issue a new token.
-    var rt = _dbContext.RefreshTokens
-      .Where(ut => ut.UserId.Equals(user.Id))
-      .OrderByDescending(ut => ut.CreatedAt)
-      .FirstOrDefault();
-
-    if (rt != null)
-    {
-      var rotatedTokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-      if (rotatedTokens != null)
-        return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = rotatedTokens.Value.token, RefreshToken = rotatedTokens.Value.refreshToken});
-    }
-
     var accessToken = await _tokenService.GenerateAccessToken(user);
     var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-    user.RefreshTokens.Add(refreshToken);
-    await _userManager.UpdateAsync(user);
+    _dbContext.RefreshTokens.Add(refreshToken);
+    await _dbContext.SaveChangesAsync();
 
     return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
   }
