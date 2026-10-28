@@ -2,7 +2,9 @@ using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
+using IdentityServer.Middleware;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -10,6 +12,7 @@ namespace IdentityServer.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[EnableRateLimiting(RateLimitPolicies.CredentialEndpoints)]
 public class AuthController : ControllerBase
 {
   private readonly UserManager<User> _userManager;
@@ -167,9 +170,10 @@ public class AuthController : ControllerBase
 
   private async Task<IActionResult> TryLogin(User user, string password)
   {
-    // FIXME: [Crit] lockoutOnFailure is false and there is no rate limiting, so passwords can be brute-forced.
     // FIXME: [Important] Login ignores the calling project and never updates User.LastLogin.
-    var result = await _signInManager.PasswordSignInAsync(user, password, false, false);
+    var result = await _signInManager.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
+    if (result.IsLockedOut)
+      return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");
     if (!result.Succeeded)
       return Unauthorized("Invalid credentials");
 

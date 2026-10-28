@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using IdentityServer;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
@@ -32,20 +33,52 @@ builder.Logging.AddConsole();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+var lockoutMaxFailedAttempts = builder.Configuration.GetValue<int?>("Security:LockoutMaxFailedAttempts")
+  ?? throw new InvalidOperationException("Security:LockoutMaxFailedAttempts is not configured.");
+var lockoutDuration = TimeSpan.FromMinutes(
+  builder.Configuration.GetValue<int?>("Security:LockoutDurationMinutes")
+  ?? throw new InvalidOperationException("Security:LockoutDurationMinutes is not configured."));
+
 builder.Services.AddIdentity<User, Role>(options =>
   {
     options.Password.RequireDigit = true;
     options.Password.RequireLowercase = true;
     options.Password.RequireNonAlphanumeric = false;
     options.Password.RequireUppercase = true;
-    // FIXME: [Crit] 4-character minimum combined with disabled lockout allows brute-forcing passwords.
+    // FIXME: [Important] 4-character minimum is too weak; NIST SP 800-63B requires at least 8.
     options.Password.RequiredLength = 4;
     options.Password.RequiredUniqueChars = 0;
+
+    options.Lockout.AllowedForNewUsers = true;
+    options.Lockout.MaxFailedAccessAttempts = lockoutMaxFailedAttempts;
+    options.Lockout.DefaultLockoutTimeSpan = lockoutDuration;
   })
   .AddEntityFrameworkStores<ApplicationDbContext>()
   .AddDefaultTokenProviders();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
+
+var credentialRateLimitPermits = builder.Configuration.GetValue<int?>("Security:CredentialRateLimitPermits")
+  ?? throw new InvalidOperationException("Security:CredentialRateLimitPermits is not configured.");
+var credentialRateLimitWindow = TimeSpan.FromSeconds(
+  builder.Configuration.GetValue<int?>("Security:CredentialRateLimitWindowSeconds")
+  ?? throw new InvalidOperationException("Security:CredentialRateLimitWindowSeconds is not configured."));
+
+// Lockout protects a single account; the per-IP limit also covers password spraying across many accounts.
+builder.Services.AddRateLimiter(options =>
+{
+  options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+  options.AddPolicy(RateLimitPolicies.CredentialEndpoints, httpContext =>
+    // TODO: Behind a reverse proxy RemoteIpAddress is the proxy address; configure ForwardedHeaders first.
+    RateLimitPartition.GetFixedWindowLimiter(
+      partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+      factory: _ => new FixedWindowRateLimiterOptions
+      {
+        PermitLimit = credentialRateLimitPermits,
+        Window = credentialRateLimitWindow,
+        QueueLimit = 0
+      }));
+});
 
 var twp = new TokenValidationParameters
 {
@@ -109,6 +142,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseRouting();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

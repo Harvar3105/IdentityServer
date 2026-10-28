@@ -78,6 +78,10 @@ Loaded in `Program.cs`: `appsettings.Development.json` (Development) or `appsett
 | `Security:JWTIssuer` / `JWTAudience`  | Expected issuer / audience               |
 | `Security:JWTExpiration`              | Access token lifetime, minutes           |
 | `Security:RTExpiration`               | Refresh token lifetime, days             |
+| `Security:CredentialRateLimitPermits` | Max requests per IP to `/api/auth/*` per window |
+| `Security:CredentialRateLimitWindowSeconds` | Rate limit window, seconds         |
+| `Security:LockoutMaxFailedAttempts`   | Failed password attempts before account lockout |
+| `Security:LockoutDurationMinutes`     | Account lockout duration, minutes        |
 | `Seed:Projects[]`                     | `Name`, `API_KEY`, `Roles { Admin[], User[], Initial }` |
 | `Seed:Users[]`                        | `Username`, `Email`, `Password`, `Roles[]` |
 
