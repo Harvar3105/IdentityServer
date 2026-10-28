@@ -32,7 +32,6 @@ public class AuthController : ControllerBase
   {
     if (model.Email == null || model.Password == null)
     {
-      // FIXME: [Important] DataModel.ToString() includes the plain-text password, which is echoed back in the response.
       return BadRequest($"Invalid data, {model}");
     }
 
@@ -220,6 +219,6 @@ public class DataModel
 
   public override string ToString()
   {
-    return $"{Username}\n{Password}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
+    return $"{Username}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
   }
 }
