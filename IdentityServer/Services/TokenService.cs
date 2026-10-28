@@ -36,6 +36,7 @@ public class TokenService : ITokenService
       new Claim(ClaimTypes.Name, user.UserName!),
     };
 
+    // FIXME: [Important] Roles are global and not scoped per project: equally named roles grant access across projects.
     var roles = await _userManager.GetRolesAsync(user);
     claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
@@ -55,6 +56,7 @@ public class TokenService : ITokenService
     return new JwtSecurityTokenHandler().WriteToken(token);
   }
 
+  // FIXME: [Important] SecurityStamp is not checked: role changes and revocations do not affect issued tokens until expiry.
   public ClaimsPrincipal? ValidateAccessToken(string token, bool validateLifetime = true)
   {
     var validationParams = _twp.Clone();
@@ -84,6 +86,8 @@ public class TokenService : ITokenService
 
   public RefreshToken GenerateRefreshToken(string ipAddress, User user)
   {
+    // FIXME: [Crit] rawToken is discarded and callers hand TokenHash to the client, which makes hashing useless:
+    // a database leak exposes usable refresh tokens. Return rawToken to the client and hash incoming values on lookup.
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
 
@@ -99,6 +103,7 @@ public class TokenService : ITokenService
     return entity;
   }
 
+  // FIXME: [Crit] No concurrency check: parallel requests with the same refresh token both succeed and each get new tokens.
   public async Task<(string token, string refreshToken)> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
     var newAccessToken = await GenerateAccessToken(user);

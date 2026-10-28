@@ -1,3 +1,4 @@
+// FIXME: [Crit] Commercially licensed Duende.IdentityServer is referenced only for IsNullOrEmpty(); use string.IsNullOrEmpty.
 using Duende.IdentityServer.Extensions;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
@@ -6,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace IdentityServer.Controllers;
 
+// FIXME: [Crit] Actions have no HTTP method or route attributes, so all of them map to "api/Manage"
+// and every request fails with AmbiguousMatchException.
 [Route("api/[controller]")]
 [ApiController]
 public class ManageController : ControllerBase
@@ -47,6 +50,7 @@ public class ManageController : ControllerBase
     return Ok("Removed");
   }
 
+  // FIXME: [Crit] No [Authorize]: anyone can read the roles of any user by id.
   public async Task<IActionResult> GetUserRoles([FromBody] DataModel data)
   {
     var user = await _userManager.FindByIdAsync(data.userId.ToString());
@@ -55,6 +59,7 @@ public class ManageController : ControllerBase
     return Ok(await _userManager.GetRolesAsync(user));
   }
 
+  // FIXME: [Crit] No [Authorize]: anyone can probe the roles of any user by id.
   public async Task<IActionResult> CheckUserRole([FromBody] DataModel data)
   {
     if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");

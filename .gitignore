@@ -52,6 +52,7 @@ node_modules/
 publish/
 
 # Migrations
+# FIXME: [Crit] Migrations must be committed; without them Database.Migrate() creates no tables on a fresh clone.
 Migrations/
 
 # Ignore temporary files and logs
@@ -69,4 +70,5 @@ log/
 tmp/
 
 
+# FIXME: [Crit] Seed/seedsettings.json is required at startup; commit a seedsettings.example.json template.
 Seed/

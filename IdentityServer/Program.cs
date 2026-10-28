@@ -38,6 +38,7 @@ builder.Services.AddIdentity<User, Role>(options =>
     options.Password.RequireLowercase = true;
     options.Password.RequireNonAlphanumeric = false;
     options.Password.RequireUppercase = true;
+    // FIXME: [Crit] 4-character minimum combined with disabled lockout allows brute-forcing passwords.
     options.Password.RequiredLength = 4;
     options.Password.RequiredUniqueChars = 0;
   })
@@ -55,6 +56,7 @@ var twp = new TokenValidationParameters
   ValidateIssuerSigningKey = true,
   ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 },
   ValidIssuer = builder.Configuration.GetValue<string>("Security:JWTIssuer"),
+  // FIXME: [Important] Single audience for all client projects: a token issued for one project is accepted by every other.
   ValidAudience = builder.Configuration.GetValue<string>("Security:JWTAudience"),
   IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
         builder.Configuration.GetValue<string>("Security:JWTSecret")!
@@ -67,6 +69,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options => { options.TokenValidationParameters = twp; });
 builder.Services.AddAuthorization();
 
+// FIXME: [Important] Any origin is allowed; restrict to the origins of registered client projects.
 builder.Services.AddCors(options =>
 {
   options.AddPolicy("AllowAll", policy =>
@@ -81,6 +84,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// FIXME: [Crit] Seed/ is git-ignored and no example file exists, so a fresh clone fails on startup here.
 builder.Configuration.AddJsonFile(
   "Seed/seedsettings.json",
   optional: false,
@@ -98,6 +102,7 @@ if (app.Environment.IsDevelopment())
   app.MapOpenApi();
 }
 
+// FIXME: [Crit] Swagger UI is exposed in every environment, including production.
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -108,6 +113,8 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// FIXME: [Important] HTTPS redirection and CORS must run before authentication/authorization;
+// CORS preflight requests to [Authorize] endpoints fail with the current order.
 app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
@@ -124,6 +131,7 @@ static void SetupAppData(WebApplication app)
       .CreateScope();
   using var context = serviceScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+  // FIXME: [Crit] Migrations/ is git-ignored, so on a fresh clone no tables are created.
   if (!context.Database.ProviderName!.Contains("InMemory"))
   {
     context.Database.Migrate();
@@ -168,6 +176,8 @@ static void SetupAppData(WebApplication app)
     var userRoles = userManager.GetRolesAsync(existingUser!).Result;
     if (!userRoles.OrderBy(r => r).SequenceEqual(user.Roles.OrderBy(r => r)))
     {
+      // FIXME: [Important] Uses the unsaved 'parsed' instance (empty Id for existing users) instead of 'existingUser',
+      // re-adds already assigned roles (UserAlreadyInRole) and never removes roles absent from the seed.
       var registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
       if (!registration.Succeeded) Console.WriteLine(registration.ToString());
     }

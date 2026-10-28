@@ -47,6 +47,7 @@ public class RequestLoggingMiddleware
       }
     }
 
+    // FIXME: [Crit] Request bodies are logged verbatim, including plain-text passwords and refresh tokens.
     if (request.Method != "GET" && request.Method != "DELETE" && request.ContentLength > 0)
     {
       using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);

@@ -6,6 +6,7 @@ services:
     container_name: sqlserver
     environment:
       - ACCEPT_EULA=Y
+      # FIXME: [Crit] Hard-coded SA password committed to the repository; move to an .env file or secrets.
       - SA_PASSWORD=1234!AbcD
       - MSSQL_PID=Express
     ports:
@@ -26,6 +27,7 @@ services:
       dockerfile: Dockerfile
     container_name: authserver
     environment:
+      # FIXME: [Crit] Container runs in Development, which enables request body logging (plain-text passwords).
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=IdentityServerDB;User Id=sa;Password=1234!AbcD;TrustServerCertificate=true;
     ports:

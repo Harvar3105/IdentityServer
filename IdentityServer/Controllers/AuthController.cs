@@ -1,3 +1,4 @@
+// FIXME: [Crit] Commercially licensed Duende.IdentityServer is referenced only for IsNullOrEmpty(); use string.IsNullOrEmpty.
 using Duende.IdentityServer.Extensions;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
@@ -33,6 +34,7 @@ public class AuthController : ControllerBase
   {
     if (model.Email == null || model.Password == null)
     {
+      // FIXME: [Important] DataModel.ToString() includes the plain-text password, which is echoed back in the response.
       return BadRequest($"Invalid data, {model}");
     }
 
@@ -50,9 +52,11 @@ public class AuthController : ControllerBase
     var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     user.RefreshTokens.Add(refreshToken);
 
+    // FIXME: [Important] Project header is validated after the user is already persisted, leaving a role-less user on failure;
+    // an unknown project key silently registers the user without any role.
     var projKey = Request.Headers["Project"].FirstOrDefault();
     if (projKey.IsNullOrEmpty()) return BadRequest("Request source is not detected!");
-    
+
     var role = _projectsInfo.GetInitialRole(projKey);
     if (role != null) await _userManager.AddToRoleAsync(user, role);    
 
@@ -60,6 +64,7 @@ public class AuthController : ControllerBase
     await _dbContext.SaveChangesAsync();
 
     var accessToken = await _tokenService.GenerateAccessToken(user);
+    // FIXME: [Crit] The stored hash is returned as the refresh token; see TokenService.GenerateRefreshToken.
     return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
   }
 
@@ -85,6 +90,7 @@ public class AuthController : ControllerBase
     }
     catch (Exception ex)
     {
+      // FIXME: [Important] Internal exception messages are leaked to the client.
       return BadRequest(new { Fail = "❌Could not login!", Reason = ex.Message });
     }
   }
@@ -118,12 +124,15 @@ public class AuthController : ControllerBase
     }
     catch (Exception ex)
     {
+      // FIXME: [Important] Internal exception messages are leaked to the client.
       return Unauthorized(ex.Message);
     }
   }
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
   {
+    // FIXME: [Crit] Client input is compared with TokenHash directly, so the stored hash acts as a plain-text token.
+    // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
     var rtEntity = await _dbContext.RefreshTokens
       .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshToken) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
     if (rtEntity == null) return null;
@@ -168,13 +177,16 @@ public class AuthController : ControllerBase
 
   private async Task<IActionResult> TryLogin(User user, string password)
   {
-    //TODO: Add lockout?
+    // FIXME: [Crit] lockoutOnFailure is false and there is no rate limiting, so passwords can be brute-forced.
+    // FIXME: [Important] Login ignores the calling project and never updates User.LastLogin.
     var result = await _signInManager.PasswordSignInAsync(user, password, false, false);
     if (!result.Succeeded)
       return Unauthorized("Invalid credentials");
 
     var userRoles = await _userManager.GetRolesAsync(user);
 
+    // FIXME: [Crit] Rotates the user's latest refresh token regardless of its revoked/expired state;
+    // logging in on one device revokes the session of another. Each login must issue a new token.
     var rt = _dbContext.RefreshTokens
       .Where(ut => ut.UserId.Equals(user.Id))
       .OrderByDescending(ut => ut.CreatedAt)
@@ -187,6 +199,7 @@ public class AuthController : ControllerBase
       user.RefreshTokens.Add(refreshToken);
       await _userManager.UpdateAsync(user);
 
+      // FIXME: [Crit] The stored hash is returned as the refresh token; see TokenService.GenerateRefreshToken.
       return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
     }
 

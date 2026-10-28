@@ -35,6 +35,8 @@ public class TokenController : ControllerBase
     }
 
     var now = DateTime.UtcNow;
+    // FIXME: [Crit] Client input is compared with TokenHash directly, so the stored hash acts as a plain-text token.
+    // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
     var refreshToken = await _dbContext.RefreshTokens
       .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(model.RefreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > now);
 
@@ -70,6 +72,7 @@ public class TokenController : ControllerBase
     }
     catch (Exception ex)
     {
+      // FIXME: [Important] Internal exception messages are leaked to the client.
       return BadRequest(new { valid = false, error = ex.Message });
     }
   }
