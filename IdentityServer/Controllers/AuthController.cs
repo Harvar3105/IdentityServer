@@ -1,5 +1,3 @@
-// FIXME: [Crit] Commercially licensed Duende.IdentityServer is referenced only for IsNullOrEmpty(); use string.IsNullOrEmpty.
-using Duende.IdentityServer.Extensions;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
@@ -55,7 +53,7 @@ public class AuthController : ControllerBase
     // FIXME: [Important] Project header is validated after the user is already persisted, leaving a role-less user on failure;
     // an unknown project key silently registers the user without any role.
     var projKey = Request.Headers["Project"].FirstOrDefault();
-    if (projKey.IsNullOrEmpty()) return BadRequest("Request source is not detected!");
+    if (string.IsNullOrEmpty(projKey)) return BadRequest("Request source is not detected!");
 
     var role = _projectsInfo.GetInitialRole(projKey);
     if (role != null) await _userManager.AddToRoleAsync(user, role);    
