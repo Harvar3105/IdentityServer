@@ -141,10 +141,11 @@ public class AuthController : ControllerBase
       rtEntity,
       HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
     );
+    if (newTokens == null) return null;
 
     var roles = await _userManager.GetRolesAsync(user);
 
-    return (User: user, Roles: roles, NewJwt: newTokens.token, NewRt: newTokens.refreshToken);
+    return (User: user, Roles: roles, NewJwt: newTokens.Value.token, NewRt: newTokens.Value.refreshToken);
   }
 
   private async Task<IActionResult> LoginByEmail(DataModel model)
@@ -188,18 +189,19 @@ public class AuthController : ControllerBase
       .OrderByDescending(ut => ut.CreatedAt)
       .FirstOrDefault();
 
-    if (rt == null)
+    if (rt != null)
     {
-      var accessToken = await _tokenService.GenerateAccessToken(user);
-      var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-      user.RefreshTokens.Add(refreshToken);
-      await _userManager.UpdateAsync(user);
-
-      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
+      var rotatedTokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+      if (rotatedTokens != null)
+        return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = rotatedTokens.Value.token, RefreshToken = rotatedTokens.Value.refreshToken});
     }
 
-    var tokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = tokens.token, RefreshToken = tokens.refreshToken});
+    var accessToken = await _tokenService.GenerateAccessToken(user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+    user.RefreshTokens.Add(refreshToken);
+    await _userManager.UpdateAsync(user);
+
+    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
   }
 
 }

@@ -54,8 +54,13 @@ public class TokenController : ControllerBase
     }
 
     var result = await _tokenService.RefreshTokens(user, refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    if (result == null)
+    {
+      _logger.LogError("💥Refresh token was already used by a concurrent request");
+      return BadRequest("Invalid or expired refresh token");
+    }
 
-    return Ok(new ResponseDTO { AccessToken = result.token, RefreshToken = result.refreshToken });
+    return Ok(new ResponseDTO { AccessToken = result.Value.token, RefreshToken = result.Value.refreshToken });
   }
 
   [HttpPost("validate")]
