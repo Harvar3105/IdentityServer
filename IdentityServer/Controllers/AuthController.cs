@@ -46,7 +46,7 @@ public class AuthController : ControllerBase
     var result = await _userManager.CreateAsync(user, model.Password);
     if (!result.Succeeded) return BadRequest(result.Errors);
 
-    var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     user.RefreshTokens.Add(refreshToken);
 
     // FIXME: [Important] Project header is validated after the user is already persisted, leaving a role-less user on failure;
@@ -61,8 +61,7 @@ public class AuthController : ControllerBase
     await _dbContext.SaveChangesAsync();
 
     var accessToken = await _tokenService.GenerateAccessToken(user);
-    // FIXME: [Crit] The stored hash is returned as the refresh token; see TokenService.GenerateRefreshToken.
-    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
+    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = rawRefreshToken});
   }
 
   [HttpPost("login")]
@@ -128,10 +127,10 @@ public class AuthController : ControllerBase
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
   {
-    // FIXME: [Crit] Client input is compared with TokenHash directly, so the stored hash acts as a plain-text token.
+    var refreshTokenHash = _tokenService.HashToken(refreshToken);
     // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
     var rtEntity = await _dbContext.RefreshTokens
-      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshToken) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
+      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
     if (rtEntity == null) return null;
     var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(rtEntity.UserId));
     if (user == null) return null;
@@ -192,12 +191,11 @@ public class AuthController : ControllerBase
     if (rt == null)
     {
       var accessToken = await _tokenService.GenerateAccessToken(user);
-      var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+      var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
       user.RefreshTokens.Add(refreshToken);
       await _userManager.UpdateAsync(user);
 
-      // FIXME: [Crit] The stored hash is returned as the refresh token; see TokenService.GenerateRefreshToken.
-      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
+      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
     }
 
     var tokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
@@ -215,6 +213,7 @@ public class DataModel
   public ICollection<string>? Roles { get; set; }
 
   public string? AccessToken { get; set; }
+  // TODO: Rename to RefreshToken: clients now send the raw token, not its hash. Changes the public JSON contract.
   public string? RefreshTokenHash { get; set; }
 
   public override string ToString()

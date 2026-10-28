@@ -35,10 +35,10 @@ public class TokenController : ControllerBase
     }
 
     var now = DateTime.UtcNow;
-    // FIXME: [Crit] Client input is compared with TokenHash directly, so the stored hash acts as a plain-text token.
+    var refreshTokenHash = _tokenService.HashToken(model.RefreshTokenHash);
     // FIXME: [Crit] A revoked token is not treated as reuse: the replacement chain is not revoked.
     var refreshToken = await _dbContext.RefreshTokens
-      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(model.RefreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > now);
+      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshTokenHash) && rt.RevokedAt == null && rt.ExpiresAt > now);
 
     if (refreshToken == null)
     {

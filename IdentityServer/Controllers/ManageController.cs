@@ -1,5 +1,3 @@
-// FIXME: [Crit] Commercially licensed Duende.IdentityServer is referenced only for IsNullOrEmpty(); use string.IsNullOrEmpty.
-using Duende.IdentityServer.Extensions;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -23,7 +21,7 @@ public class ManageController : ControllerBase
   [Authorize(Roles = "ADMIN")]
   public async Task<IActionResult> AsignRole([FromBody] DataModel data)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
+    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
     if (data.role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
 
     var user = await _userManager.FindByIdAsync(data.userId.ToString());
@@ -38,7 +36,7 @@ public class ManageController : ControllerBase
   [Authorize(Roles = "ADMIN")]
   public async Task<IActionResult> RemoveRole([FromBody] DataModel data)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
+    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
     if (data.role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
 
     var user = await _userManager.FindByIdAsync(data.userId.ToString());
@@ -62,7 +60,7 @@ public class ManageController : ControllerBase
   // FIXME: [Crit] No [Authorize]: anyone can probe the roles of any user by id.
   public async Task<IActionResult> CheckUserRole([FromBody] DataModel data)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
+    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
 
     var user = await _userManager.FindByIdAsync(data.userId.ToString());
     if (user is null) return BadRequest("User not found!");

@@ -84,10 +84,9 @@ public class TokenService : ITokenService
     return principal;
   }
 
-  public RefreshToken GenerateRefreshToken(string ipAddress, User user)
+  // Only the hash is persisted; the raw token is handed to the client and never stored.
+  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user)
   {
-    // FIXME: [Crit] rawToken is discarded and callers hand TokenHash to the client, which makes hashing useless:
-    // a database leak exposes usable refresh tokens. Return rawToken to the client and hash incoming values on lookup.
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
 
@@ -100,14 +99,14 @@ public class TokenService : ITokenService
       ExpiresAt = DateTime.UtcNow.AddDays(_config.GetValue<int>("Security:RTExpiration"))
     };
 
-    return entity;
+    return (entity, rawToken);
   }
 
   // FIXME: [Crit] No concurrency check: parallel requests with the same refresh token both succeed and each get new tokens.
   public async Task<(string token, string refreshToken)> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
     var newAccessToken = await GenerateAccessToken(user);
-    var newRefreshToken = GenerateRefreshToken(ipAddress, user);
+    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user);
 
     await RevokeRefreshToken(newRefreshToken, oldToken, ipAddress);
 
@@ -115,7 +114,7 @@ public class TokenService : ITokenService
     _dbContext.Update(user);
     await _dbContext.SaveChangesAsync();
 
-    return (newAccessToken, newRefreshToken.TokenHash);
+    return (newAccessToken, newRawRefreshToken);
   }
 
   public async Task RevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
