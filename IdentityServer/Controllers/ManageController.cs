@@ -1,27 +1,32 @@
 using IdentityServer.Domain.Dtos;
+using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace IdentityServer.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize]
 public class ManageController : ControllerBase
 {
   private readonly UserManager<User> _userManager;
+  private readonly RoleSettings _roleSettings;
 
-  public ManageController(UserManager<User> userManager)
+  public ManageController(UserManager<User> userManager, IOptions<RoleSettings> roleSettings)
   {
     _userManager = userManager;
+    _roleSettings = roleSettings.Value;
   }
 
-  [Authorize(Roles = "ADMIN")]
-  [HttpPost("assign-role")]
+  [HttpPost("assignRole")]
   public async Task<IActionResult> AssignRole([FromBody] UserRoleRequest request)
   {
-    if (request.Role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
+    if (!_roleSettings.IsAvailable(request.Role)) return BadRequest($"Role {request.Role} does not exist!");
+    if (!CanManageRole(request.Role)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
@@ -32,14 +37,16 @@ public class ManageController : ControllerBase
     return Ok("Assigned");
   }
 
-  [Authorize(Roles = "ADMIN")]
-  [HttpPost("remove-role")]
+  [HttpPost("removeRole")]
   public async Task<IActionResult> RemoveRole([FromBody] UserRoleRequest request)
   {
-    if (request.Role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
+    if (!CanManageRole(request.Role)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
+
+    if (_roleSettings.IsRoot(request.Role) && (await _userManager.GetUsersInRoleAsync(_roleSettings.Root)).Count <= 1)
+      return BadRequest("Cannot remove the root role from its last holder!");
 
     var success = await _userManager.RemoveFromRoleAsync(user, request.Role);
     if (!success.Succeeded) return BadRequest($"Cannot remove {request.Role} from user!");
@@ -47,11 +54,10 @@ public class ManageController : ControllerBase
     return Ok("Removed");
   }
 
-  [Authorize]
-  [HttpGet("user-roles")]
+  [HttpGet("userRoles")]
   public async Task<IActionResult> GetUserRoles([FromQuery] Guid userId)
   {
-    if (!IsAdminOrSelf(userId)) return Forbid();
+    if (!IsRoleManagerOrSelf(userId)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
@@ -59,20 +65,31 @@ public class ManageController : ControllerBase
     return Ok(await _userManager.GetRolesAsync(user));
   }
 
-  [Authorize]
-  [HttpGet("has-role")]
+  [HttpGet("hasRole")]
   public async Task<IActionResult> CheckUserRole([FromQuery] Guid userId, [FromQuery] string role)
   {
-    if (!IsAdminOrSelf(userId)) return Forbid();
+    if (!IsRoleManagerOrSelf(userId)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(role)));
+    return Ok(await _userManager.IsInRoleAsync(user, role));
   }
 
-  private bool IsAdminOrSelf(Guid userId)
+  // Root can manage every role; managers can manage only roles that are neither root nor manager roles.
+  private bool CanManageRole(string role)
   {
-    return User.IsInRole("ADMIN") || _userManager.GetUserId(User) == userId.ToString();
+    if (User.IsInRole(_roleSettings.Root)) return true;
+    return !_roleSettings.IsPrivileged(role) && IsRoleManager();
+  }
+
+  private bool IsRoleManager()
+  {
+    return User.IsInRole(_roleSettings.Root) || _roleSettings.Managers.Any(User.IsInRole);
+  }
+
+  private bool IsRoleManagerOrSelf(Guid userId)
+  {
+    return IsRoleManager() || _userManager.GetUserId(User) == userId.ToString();
   }
 }

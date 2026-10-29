@@ -24,6 +24,15 @@ else
   builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 }
+
+// Roles are required in every environment (registration assigns Roles:Initial), so the file may be replaced
+// by Roles__* environment variables; seeded users are development data only.
+builder.Configuration.AddJsonFile("Seed/roles.json", optional: true, reloadOnChange: false);
+if (builder.Environment.IsDevelopment())
+{
+  builder.Configuration.AddJsonFile("Seed/users.json", optional: true, reloadOnChange: false);
+}
+
 builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddOpenApi();
 
@@ -128,19 +137,16 @@ if (builder.Environment.IsDevelopment())
   builder.Services.AddSwaggerGen();
 }
 
-if (builder.Environment.IsDevelopment())
-{
-  builder.Configuration.AddJsonFile(
-    "Seed/seedsettings.json",
-    optional: true,
-    reloadOnChange: false
-  );
-}
-// TODO: Projects (API keys, roles) are runtime configuration required in production, not seed data;
-// move them from the "Seed" section into a dedicated "Projects" section.
 builder.Services.Configure<SeedSettings>(
   builder.Configuration.GetSection("Seed")
 );
+builder.Services.AddOptions<RoleSettings>()
+  .Bind(builder.Configuration.GetSection("Roles"))
+  .Validate(roles => roles.IsAvailable(roles.Initial), "Roles:Initial must be listed in Roles:Available.")
+  .Validate(roles => roles.IsAvailable(roles.Root), "Roles:Root must be listed in Roles:Available.")
+  .Validate(roles => roles.Managers.All(roles.IsAvailable), "Every Roles:Managers entry must be listed in Roles:Available.")
+  .Validate(roles => !roles.IsPrivileged(roles.Initial), "Roles:Initial must not be the root or a manager role.")
+  .ValidateOnStart();
 
 var app = builder.Build();
 
@@ -188,9 +194,11 @@ static void SetupAppData(WebApplication app)
   var seedSettings = serviceScope.ServiceProvider
     .GetRequiredService<IOptions<SeedSettings>>()
     .Value;
+  var roleSettings = serviceScope.ServiceProvider
+    .GetRequiredService<IOptions<RoleSettings>>()
+    .Value;
 
-  string[] roles = seedSettings.Projects.Select(p => p.Roles).SelectMany(r => r.Admin.Concat(r.User)).Distinct().ToArray();
-  foreach (var role in roles)
+  foreach (var role in roleSettings.Available)
   {
     var exists = roleManager.FindByNameAsync(role).Result;
     if (exists is not null) continue;
@@ -202,33 +210,43 @@ static void SetupAppData(WebApplication app)
     if (!result.Succeeded) Console.WriteLine(result.ToString());
   }
 
-  // Project roles above are needed by registration in every environment; seeded users are development data only.
   if (!app.Environment.IsDevelopment()) return;
 
-  foreach (var user in seedSettings.Users)
+  foreach (var seedUser in seedSettings.Users)
   {
-    var parsed = new User()
+    var unknownRoles = seedUser.Roles.Where(role => !roleSettings.IsAvailable(role)).ToList();
+    if (unknownRoles.Count > 0)
     {
-      Email = user.Email,
-      UserName = user.Username,
-    };
-
-    var existingUser = userManager.FindByEmailAsync(user.Email).Result;
-
-    if (existingUser is null)
-    {
-      var registration = userManager.CreateAsync(parsed, user.Password).Result;
-      if (!registration.Succeeded) Console.WriteLine(registration.ToString());
-      existingUser = userManager.FindByEmailAsync(parsed.Email).Result;
+      Console.WriteLine($"Seed user {seedUser.Email} skipped: roles {string.Join(", ", unknownRoles)} are not listed in Roles:Available.");
+      continue;
     }
-    
-    var userRoles = userManager.GetRolesAsync(existingUser!).Result;
-    if (!userRoles.OrderBy(r => r).SequenceEqual(user.Roles.OrderBy(r => r)))
+
+    var user = userManager.FindByEmailAsync(seedUser.Email).Result;
+    if (user is null)
     {
-      // FIXME: [Important] Uses the unsaved 'parsed' instance (empty Id for existing users) instead of 'existingUser',
-      // re-adds already assigned roles (UserAlreadyInRole) and never removes roles absent from the seed.
-      var registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
-      if (!registration.Succeeded) Console.WriteLine(registration.ToString());
+      user = new User { Email = seedUser.Email, UserName = seedUser.Username };
+      var creationResult = userManager.CreateAsync(user, seedUser.Password).Result;
+      if (!creationResult.Succeeded)
+      {
+        Console.WriteLine($"Seed user {seedUser.Email} not created: {creationResult}");
+        continue;
+      }
+    }
+
+    var currentRoles = userManager.GetRolesAsync(user).Result;
+    var missingRoles = seedUser.Roles.Except(currentRoles, StringComparer.OrdinalIgnoreCase).ToList();
+    var extraRoles = currentRoles.Except(seedUser.Roles, StringComparer.OrdinalIgnoreCase).ToList();
+
+    if (missingRoles.Count > 0)
+    {
+      var addResult = userManager.AddToRolesAsync(user, missingRoles).Result;
+      if (!addResult.Succeeded) Console.WriteLine($"Seed user {seedUser.Email} roles not added: {addResult}");
+    }
+
+    if (extraRoles.Count > 0)
+    {
+      var removeResult = userManager.RemoveFromRolesAsync(user, extraRoles).Result;
+      if (!removeResult.Succeeded) Console.WriteLine($"Seed user {seedUser.Email} roles not removed: {removeResult}");
     }
   }
 }

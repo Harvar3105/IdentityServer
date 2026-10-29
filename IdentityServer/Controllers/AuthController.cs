@@ -19,15 +19,15 @@ public class AuthController : ControllerBase
   private readonly SignInManager<User> _signInManager;
   private readonly ITokenService _tokenService;
   private readonly ApplicationDbContext _dbContext;
-  private readonly SeedSettings _projectsInfo;
+  private readonly RoleSettings _roleSettings;
 
-  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context, IOptions<SeedSettings> info)
+  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context, IOptions<RoleSettings> roleSettings)
   {
     _userManager = userManager;
     _signInManager = signInManager;
     _tokenService = tokenService;
     _dbContext = context;
-    _projectsInfo = info.Value;
+    _roleSettings = roleSettings.Value;
   }
 
   [HttpPost("register")]
@@ -52,13 +52,7 @@ public class AuthController : ControllerBase
     var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     user.RefreshTokens.Add(refreshToken);
 
-    // FIXME: [Important] Project header is validated after the user is already persisted, leaving a role-less user on failure;
-    // an unknown project key silently registers the user without any role.
-    var projKey = Request.Headers["Project"].FirstOrDefault();
-    if (string.IsNullOrEmpty(projKey)) return BadRequest("Request source is not detected!");
-
-    var role = _projectsInfo.GetInitialRole(projKey);
-    if (role != null) await _userManager.AddToRoleAsync(user, role);    
+    await _userManager.AddToRoleAsync(user, _roleSettings.Initial);
 
     await _userManager.UpdateAsync(user);
     await _dbContext.SaveChangesAsync();
