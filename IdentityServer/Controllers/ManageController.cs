@@ -47,23 +47,32 @@ public class ManageController : ControllerBase
     return Ok("Removed");
   }
 
-  // FIXME: [Crit] No [Authorize]: anyone can read the roles of any user by id.
+  [Authorize]
   [HttpGet("user-roles")]
   public async Task<IActionResult> GetUserRoles([FromQuery] Guid userId)
   {
+    if (!IsAdminOrSelf(userId)) return Forbid();
+
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
     return Ok(await _userManager.GetRolesAsync(user));
   }
 
-  // FIXME: [Crit] No [Authorize]: anyone can probe the roles of any user by id.
+  [Authorize]
   [HttpGet("has-role")]
   public async Task<IActionResult> CheckUserRole([FromQuery] Guid userId, [FromQuery] string role)
   {
+    if (!IsAdminOrSelf(userId)) return Forbid();
+
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
     return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(role)));
+  }
+
+  private bool IsAdminOrSelf(Guid userId)
+  {
+    return User.IsInRole("ADMIN") || _userManager.GetUserId(User) == userId.ToString();
   }
 }

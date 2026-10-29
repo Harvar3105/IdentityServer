@@ -100,8 +100,8 @@ All routes are prefixed with `api/[controller]`.
 | POST   | `/api/token/validate`  | none   | Validates an access token passed as a raw JSON string body |
 | POST   | `/api/manage/assign-role` | `ADMIN` | Body `{ userId, role }`; assigns a role (except `ADMIN`) |
 | POST   | `/api/manage/remove-role` | `ADMIN` | Body `{ userId, role }`; removes a role (except `ADMIN`) |
-| GET    | `/api/manage/user-roles?userId=` | none | Lists the user's roles |
-| GET    | `/api/manage/has-role?userId=&role=` | none | Returns whether the user has the role |
+| GET    | `/api/manage/user-roles?userId=` | self or `ADMIN` | Lists the user's roles |
+| GET    | `/api/manage/has-role?userId=&role=` | self or `ADMIN` | Returns whether the user has the role |
 
 ## Token Model
 

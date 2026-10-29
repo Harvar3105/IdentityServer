@@ -98,7 +98,14 @@ var twp = new TokenValidationParameters
 };
 builder.Services.AddSingleton(twp);
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+// AddIdentity sets cookie authentication as the default authenticate/challenge scheme,
+// which takes precedence over DefaultScheme, so JWT has to override them explicitly.
+builder.Services.AddAuthentication(options =>
+  {
+    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+  })
     .AddJwtBearer(options => { options.TokenValidationParameters = twp; });
 builder.Services.AddAuthorization();
 
