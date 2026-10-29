@@ -5,6 +5,7 @@ using System.Text;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Services;
@@ -36,6 +37,7 @@ public class TokenService : ITokenService
       new Claim(ClaimTypes.Name, user.UserName!),
     };
 
+    // FIXME: [Important] Roles are global and not scoped per project: equally named roles grant access across projects.
     var roles = await _userManager.GetRolesAsync(user);
     claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
@@ -55,6 +57,7 @@ public class TokenService : ITokenService
     return new JwtSecurityTokenHandler().WriteToken(token);
   }
 
+  // FIXME: [Important] SecurityStamp is not checked: role changes and revocations do not affect issued tokens until expiry.
   public ClaimsPrincipal? ValidateAccessToken(string token, bool validateLifetime = true)
   {
     var validationParams = _twp.Clone();
@@ -82,7 +85,8 @@ public class TokenService : ITokenService
     return principal;
   }
 
-  public RefreshToken GenerateRefreshToken(string ipAddress, User user)
+  // Only the hash is persisted; the raw token is handed to the client and never stored.
+  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user)
   {
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
@@ -96,29 +100,64 @@ public class TokenService : ITokenService
       ExpiresAt = DateTime.UtcNow.AddDays(_config.GetValue<int>("Security:RTExpiration"))
     };
 
-    return entity;
+    return (entity, rawToken);
   }
 
-  public async Task<(string token, string refreshToken)> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
+  public async Task<RefreshToken?> FindActiveRefreshToken(string rawToken, string ipAddress)
   {
-    var newAccessToken = await GenerateAccessToken(user);
-    var newRefreshToken = GenerateRefreshToken(ipAddress, user);
+    var tokenHash = HashToken(rawToken);
+    var refreshToken = await _dbContext.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
+    if (refreshToken == null) return null;
 
-    await RevokeRefreshToken(newRefreshToken, oldToken, ipAddress);
+    if (refreshToken.RevokedAt != null)
+    {
+      _logger.LogWarning("💥Revoked refresh token reused for user {UserId}; revoking all active refresh tokens", refreshToken.UserId);
+      await RevokeAllRefreshTokens(refreshToken.UserId, ipAddress);
+      return null;
+    }
 
-    user.RefreshTokens.Add(newRefreshToken);
-    _dbContext.Update(user);
+    return refreshToken.IsActive ? refreshToken : null;
+  }
+
+  public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
+  {
+    var revokedAt = DateTime.UtcNow;
+    await _dbContext.RefreshTokens
+      .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, revokedAt)
+        .SetProperty(rt => rt.RevokedByIp, ipAddress));
+  }
+
+  public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
+  {
+    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user);
+
+    await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
+    if (!await TryRevokeRefreshToken(newRefreshToken, oldToken, ipAddress)) return null;
+
+    _dbContext.RefreshTokens.Add(newRefreshToken);
     await _dbContext.SaveChangesAsync();
+    await transaction.CommitAsync();
 
-    return (newAccessToken, newRefreshToken.TokenHash);
+    var newAccessToken = await GenerateAccessToken(user);
+    return (newAccessToken, newRawRefreshToken);
   }
 
-  public async Task RevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
+  public async Task<bool> TryRevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress)
   {
-    oldToken.RevokedAt = DateTime.UtcNow;
-    oldToken.RevokedByIp = ipAddress;
-    oldToken.ReplacedByTokenHash = newToken.TokenHash;
-    _dbContext.Update(oldToken);
+    // Conditional UPDATE executed in the database: of several concurrent requests holding the same
+    // token only one sees RevokedAt == null, the others affect 0 rows and are rejected.
+    var revokedAt = DateTime.UtcNow;
+    var affectedRows = await _dbContext.RefreshTokens
+      .Where(rt => rt.Id == oldToken.Id && rt.RevokedAt == null)
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, revokedAt)
+        .SetProperty(rt => rt.RevokedByIp, ipAddress)
+        .SetProperty(rt => rt.ReplacedByTokenHash, newToken.TokenHash));
+
+    return affectedRows == 1;
   }
 
   public string HashToken(string token)

@@ -1,9 +1,10 @@
-using Duende.IdentityServer.Extensions;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
+using IdentityServer.Middleware;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +12,7 @@ namespace IdentityServer.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[EnableRateLimiting(RateLimitPolicies.CredentialEndpoints)]
 public class AuthController : ControllerBase
 {
   private readonly UserManager<User> _userManager;
@@ -47,12 +49,14 @@ public class AuthController : ControllerBase
     var result = await _userManager.CreateAsync(user, model.Password);
     if (!result.Succeeded) return BadRequest(result.Errors);
 
-    var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     user.RefreshTokens.Add(refreshToken);
 
+    // FIXME: [Important] Project header is validated after the user is already persisted, leaving a role-less user on failure;
+    // an unknown project key silently registers the user without any role.
     var projKey = Request.Headers["Project"].FirstOrDefault();
-    if (projKey.IsNullOrEmpty()) return BadRequest("Request source is not detected!");
-    
+    if (string.IsNullOrEmpty(projKey)) return BadRequest("Request source is not detected!");
+
     var role = _projectsInfo.GetInitialRole(projKey);
     if (role != null) await _userManager.AddToRoleAsync(user, role);    
 
@@ -60,7 +64,7 @@ public class AuthController : ControllerBase
     await _dbContext.SaveChangesAsync();
 
     var accessToken = await _tokenService.GenerateAccessToken(user);
-    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
+    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = rawRefreshToken});
   }
 
   [HttpPost("login")]
@@ -85,6 +89,7 @@ public class AuthController : ControllerBase
     }
     catch (Exception ex)
     {
+      // FIXME: [Important] Internal exception messages are leaked to the client.
       return BadRequest(new { Fail = "❌Could not login!", Reason = ex.Message });
     }
   }
@@ -118,28 +123,25 @@ public class AuthController : ControllerBase
     }
     catch (Exception ex)
     {
+      // FIXME: [Important] Internal exception messages are leaked to the client.
       return Unauthorized(ex.Message);
     }
   }
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
   {
-    var rtEntity = await _dbContext.RefreshTokens
-      .FirstOrDefaultAsync(rt => rt.TokenHash.Equals(refreshToken) && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow);
+    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var rtEntity = await _tokenService.FindActiveRefreshToken(refreshToken, ipAddress);
     if (rtEntity == null) return null;
     var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(rtEntity.UserId));
     if (user == null) return null;
 
-    var newTokens = await _tokenService.RefreshTokens
-    (
-      user,
-      rtEntity,
-      HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
-    );
+    var newTokens = await _tokenService.RefreshTokens(user, rtEntity, ipAddress);
+    if (newTokens == null) return null;
 
     var roles = await _userManager.GetRolesAsync(user);
 
-    return (User: user, Roles: roles, NewJwt: newTokens.token, NewRt: newTokens.refreshToken);
+    return (User: user, Roles: roles, NewJwt: newTokens.Value.token, NewRt: newTokens.Value.refreshToken);
   }
 
   private async Task<IActionResult> LoginByEmail(DataModel model)
@@ -168,30 +170,21 @@ public class AuthController : ControllerBase
 
   private async Task<IActionResult> TryLogin(User user, string password)
   {
-    //TODO: Add lockout?
-    var result = await _signInManager.PasswordSignInAsync(user, password, false, false);
+    // FIXME: [Important] Login ignores the calling project and never updates User.LastLogin.
+    var result = await _signInManager.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
+    if (result.IsLockedOut)
+      return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");
     if (!result.Succeeded)
       return Unauthorized("Invalid credentials");
 
     var userRoles = await _userManager.GetRolesAsync(user);
 
-    var rt = _dbContext.RefreshTokens
-      .Where(ut => ut.UserId.Equals(user.Id))
-      .OrderByDescending(ut => ut.CreatedAt)
-      .FirstOrDefault();
+    var accessToken = await _tokenService.GenerateAccessToken(user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+    _dbContext.RefreshTokens.Add(refreshToken);
+    await _dbContext.SaveChangesAsync();
 
-    if (rt == null)
-    {
-      var accessToken = await _tokenService.GenerateAccessToken(user);
-      var refreshToken = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-      user.RefreshTokens.Add(refreshToken);
-      await _userManager.UpdateAsync(user);
-
-      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = refreshToken.TokenHash});
-    }
-
-    var tokens = await _tokenService.RefreshTokens(user, rt, HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
-    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = tokens.token, RefreshToken = tokens.refreshToken});
+    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
   }
 
 }
@@ -205,10 +198,11 @@ public class DataModel
   public ICollection<string>? Roles { get; set; }
 
   public string? AccessToken { get; set; }
+  // TODO: Rename to RefreshToken: clients now send the raw token, not its hash. Changes the public JSON contract.
   public string? RefreshTokenHash { get; set; }
 
   public override string ToString()
   {
-    return $"{Username}\n{Password}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
+    return $"{Username}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
   }
 }

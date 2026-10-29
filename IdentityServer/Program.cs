@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using IdentityServer;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
@@ -32,19 +33,52 @@ builder.Logging.AddConsole();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+var lockoutMaxFailedAttempts = builder.Configuration.GetValue<int?>("Security:LockoutMaxFailedAttempts")
+  ?? throw new InvalidOperationException("Security:LockoutMaxFailedAttempts is not configured.");
+var lockoutDuration = TimeSpan.FromMinutes(
+  builder.Configuration.GetValue<int?>("Security:LockoutDurationMinutes")
+  ?? throw new InvalidOperationException("Security:LockoutDurationMinutes is not configured."));
+var lockoutAllowedForNewUsers = builder.Configuration.GetValue<bool?>("Security:LockoutAllowedForNewUsers")
+  ?? throw new InvalidOperationException("Security:LockoutAllowedForNewUsers is not configured.");
+
+var passwordPolicySection = builder.Configuration.GetSection("Security:Password");
+if (!passwordPolicySection.Exists())
+  throw new InvalidOperationException("Security:Password is not configured.");
+
 builder.Services.AddIdentity<User, Role>(options =>
   {
-    options.Password.RequireDigit = true;
-    options.Password.RequireLowercase = true;
-    options.Password.RequireNonAlphanumeric = false;
-    options.Password.RequireUppercase = true;
-    options.Password.RequiredLength = 4;
-    options.Password.RequiredUniqueChars = 0;
+    passwordPolicySection.Bind(options.Password);
+
+    options.Lockout.AllowedForNewUsers = lockoutAllowedForNewUsers;
+    options.Lockout.MaxFailedAccessAttempts = lockoutMaxFailedAttempts;
+    options.Lockout.DefaultLockoutTimeSpan = lockoutDuration;
   })
   .AddEntityFrameworkStores<ApplicationDbContext>()
   .AddDefaultTokenProviders();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
+
+var credentialRateLimitPermits = builder.Configuration.GetValue<int?>("Security:CredentialRateLimitPermits")
+  ?? throw new InvalidOperationException("Security:CredentialRateLimitPermits is not configured.");
+var credentialRateLimitWindow = TimeSpan.FromSeconds(
+  builder.Configuration.GetValue<int?>("Security:CredentialRateLimitWindowSeconds")
+  ?? throw new InvalidOperationException("Security:CredentialRateLimitWindowSeconds is not configured."));
+
+// Lockout protects a single account; the per-IP limit also covers password spraying across many accounts.
+builder.Services.AddRateLimiter(options =>
+{
+  options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+  options.AddPolicy(RateLimitPolicies.CredentialEndpoints, httpContext =>
+    // TODO: Behind a reverse proxy RemoteIpAddress is the proxy address; configure ForwardedHeaders first.
+    RateLimitPartition.GetFixedWindowLimiter(
+      partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+      factory: _ => new FixedWindowRateLimiterOptions
+      {
+        PermitLimit = credentialRateLimitPermits,
+        Window = credentialRateLimitWindow,
+        QueueLimit = 0
+      }));
+});
 
 var twp = new TokenValidationParameters
 {
@@ -55,6 +89,7 @@ var twp = new TokenValidationParameters
   ValidateIssuerSigningKey = true,
   ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 },
   ValidIssuer = builder.Configuration.GetValue<string>("Security:JWTIssuer"),
+  // FIXME: [Important] Single audience for all client projects: a token issued for one project is accepted by every other.
   ValidAudience = builder.Configuration.GetValue<string>("Security:JWTAudience"),
   IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
         builder.Configuration.GetValue<string>("Security:JWTSecret")!
@@ -63,10 +98,18 @@ var twp = new TokenValidationParameters
 };
 builder.Services.AddSingleton(twp);
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+// AddIdentity sets cookie authentication as the default authenticate/challenge scheme,
+// which takes precedence over DefaultScheme, so JWT has to override them explicitly.
+builder.Services.AddAuthentication(options =>
+  {
+    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+  })
     .AddJwtBearer(options => { options.TokenValidationParameters = twp; });
 builder.Services.AddAuthorization();
 
+// FIXME: [Important] Any origin is allowed; restrict to the origins of registered client projects.
 builder.Services.AddCors(options =>
 {
   options.AddPolicy("AllowAll", policy =>
@@ -78,14 +121,23 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-builder.Configuration.AddJsonFile(
-  "Seed/seedsettings.json",
-  optional: false,
-  reloadOnChange: false
-);
+if (builder.Environment.IsDevelopment())
+{
+  builder.Services.AddEndpointsApiExplorer();
+  builder.Services.AddSwaggerGen();
+}
+
+if (builder.Environment.IsDevelopment())
+{
+  builder.Configuration.AddJsonFile(
+    "Seed/seedsettings.json",
+    optional: true,
+    reloadOnChange: false
+  );
+}
+// TODO: Projects (API keys, roles) are runtime configuration required in production, not seed data;
+// move them from the "Seed" section into a dedicated "Projects" section.
 builder.Services.Configure<SeedSettings>(
   builder.Configuration.GetSection("Seed")
 );
@@ -96,18 +148,20 @@ if (app.Environment.IsDevelopment())
 {
   app.UseMiddleware<RequestLoggingMiddleware>();
   app.MapOpenApi();
+  app.UseSwagger();
+  app.UseSwaggerUI();
 }
 
-app.UseSwagger();
-app.UseSwaggerUI();
-
 app.UseRouting();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
+// FIXME: [Important] HTTPS redirection and CORS must run before authentication/authorization;
+// CORS preflight requests to [Authorize] endpoints fail with the current order.
 app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
@@ -148,6 +202,9 @@ static void SetupAppData(WebApplication app)
     if (!result.Succeeded) Console.WriteLine(result.ToString());
   }
 
+  // Project roles above are needed by registration in every environment; seeded users are development data only.
+  if (!app.Environment.IsDevelopment()) return;
+
   foreach (var user in seedSettings.Users)
   {
     var parsed = new User()
@@ -168,6 +225,8 @@ static void SetupAppData(WebApplication app)
     var userRoles = userManager.GetRolesAsync(existingUser!).Result;
     if (!userRoles.OrderBy(r => r).SequenceEqual(user.Roles.OrderBy(r => r)))
     {
+      // FIXME: [Important] Uses the unsaved 'parsed' instance (empty Id for existing users) instead of 'existingUser',
+      // re-adds already assigned roles (UserAlreadyInRole) and never removes roles absent from the seed.
       var registration = userManager.AddToRolesAsync(parsed, user.Roles).Result;
       if (!registration.Succeeded) Console.WriteLine(registration.ToString());
     }

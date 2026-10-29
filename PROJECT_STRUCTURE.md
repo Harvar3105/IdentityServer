@@ -78,6 +78,12 @@ Loaded in `Program.cs`: `appsettings.Development.json` (Development) or `appsett
 | `Security:JWTIssuer` / `JWTAudience`  | Expected issuer / audience               |
 | `Security:JWTExpiration`              | Access token lifetime, minutes           |
 | `Security:RTExpiration`               | Refresh token lifetime, days             |
+| `Security:CredentialRateLimitPermits` | Max requests per IP to `/api/auth/*` per window |
+| `Security:CredentialRateLimitWindowSeconds` | Rate limit window, seconds         |
+| `Security:LockoutMaxFailedAttempts`   | Failed password attempts before account lockout |
+| `Security:LockoutDurationMinutes`     | Account lockout duration, minutes        |
+| `Security:LockoutAllowedForNewUsers`  | Whether newly created users can be locked out |
+| `Security:Password`                   | Identity `PasswordOptions`: `RequiredLength` (8), `RequiredUniqueChars`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`, `RequireNonAlphanumeric` |
 | `Seed:Projects[]`                     | `Name`, `API_KEY`, `Roles { Admin[], User[], Initial }` |
 | `Seed:Users[]`                        | `Username`, `Email`, `Password`, `Roles[]` |
 
@@ -94,7 +100,10 @@ All routes are prefixed with `api/[controller]`.
 | POST   | `/api/auth/login`      | none   | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
 | POST   | `/api/token/refresh`   | none   | Rotates a refresh token and issues a new access token |
 | POST   | `/api/token/validate`  | none   | Validates an access token passed as a raw JSON string body |
-| —      | `/api/manage/*`        | `ADMIN` (partly) | `AsignRole`, `RemoveRole`, `GetUserRoles`, `CheckUserRole` — no HTTP verb/route attributes yet |
+| POST   | `/api/manage/assign-role` | `ADMIN` | Body `{ userId, role }`; assigns a role (except `ADMIN`) |
+| POST   | `/api/manage/remove-role` | `ADMIN` | Body `{ userId, role }`; removes a role (except `ADMIN`) |
+| GET    | `/api/manage/user-roles?userId=` | self or `ADMIN` | Lists the user's roles |
+| GET    | `/api/manage/has-role?userId=&role=` | self or `ADMIN` | Returns whether the user has the role |
 
 ## Token Model
 

@@ -1,4 +1,4 @@
-using Duende.IdentityServer.Extensions;
+using IdentityServer.Domain.Dtos;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -18,56 +18,61 @@ public class ManageController : ControllerBase
   }
 
   [Authorize(Roles = "ADMIN")]
-  public async Task<IActionResult> AsignRole([FromBody] DataModel data)
+  [HttpPost("assign-role")]
+  public async Task<IActionResult> AssignRole([FromBody] UserRoleRequest request)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
-    if (data.role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
+    if (request.Role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
 
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    var success = await _userManager.AddToRoleAsync(user, data.role);
-    if (!success.Succeeded) return BadRequest($"Cannot assign {data.role} to user!");
+    var success = await _userManager.AddToRoleAsync(user, request.Role);
+    if (!success.Succeeded) return BadRequest($"Cannot assign {request.Role} to user!");
 
     return Ok("Assigned");
   }
 
   [Authorize(Roles = "ADMIN")]
-  public async Task<IActionResult> RemoveRole([FromBody] DataModel data)
+  [HttpPost("remove-role")]
+  public async Task<IActionResult> RemoveRole([FromBody] UserRoleRequest request)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
-    if (data.role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
+    if (request.Role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
 
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    var success = await _userManager.RemoveFromRoleAsync(user, data.role);
-    if (!success.Succeeded) return BadRequest($"Cannot remove {data.role} from user!");
+    var success = await _userManager.RemoveFromRoleAsync(user, request.Role);
+    if (!success.Succeeded) return BadRequest($"Cannot remove {request.Role} from user!");
 
     return Ok("Removed");
   }
 
-  public async Task<IActionResult> GetUserRoles([FromBody] DataModel data)
+  [Authorize]
+  [HttpGet("user-roles")]
+  public async Task<IActionResult> GetUserRoles([FromQuery] Guid userId)
   {
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    if (!IsAdminOrSelf(userId)) return Forbid();
+
+    var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
     return Ok(await _userManager.GetRolesAsync(user));
   }
 
-  public async Task<IActionResult> CheckUserRole([FromBody] DataModel data)
+  [Authorize]
+  [HttpGet("has-role")]
+  public async Task<IActionResult> CheckUserRole([FromQuery] Guid userId, [FromQuery] string role)
   {
-    if (data.role.IsNullOrEmpty()) return BadRequest("Role must be specified!");
+    if (!IsAdminOrSelf(userId)) return Forbid();
 
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(data.role)));
+    return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(role)));
   }
 
-  public class DataModel
+  private bool IsAdminOrSelf(Guid userId)
   {
-    public required Guid userId { get; set; }
-    public required string? role { get; set; }
+    return User.IsInRole("ADMIN") || _userManager.GetUserId(User) == userId.ToString();
   }
 }
