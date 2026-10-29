@@ -117,12 +117,13 @@ builder.Services.AddAuthentication(options =>
     .AddJwtBearer(options => { options.TokenValidationParameters = twp; });
 builder.Services.AddAuthorization();
 
-// FIXME: [Important] Any origin is allowed; restrict to the origins of registered client projects.
+// An empty or missing list blocks all cross-origin browser requests; server-to-server calls are unaffected.
+var allowedOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>
 {
-  options.AddPolicy("AllowAll", policy =>
+  options.AddDefaultPolicy(policy =>
   {
-    policy.AllowAnyOrigin()
+    policy.WithOrigins(allowedOrigins)
           .AllowAnyHeader()
           .AllowAnyMethod();
   });
@@ -157,19 +158,16 @@ if (app.Environment.IsDevelopment())
   app.UseSwaggerUI();
 }
 
+app.UseHttpsRedirection();
 app.UseRouting();
+// CORS answers preflight requests before they reach rate limiting and authorization.
+app.UseCors();
 app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
-// FIXME: [Important] HTTPS redirection and CORS must run before authentication/authorization;
-// CORS preflight requests to [Authorize] endpoints fail with the current order.
-app.UseHttpsRedirection();
-
-app.UseCors("AllowAll");
 
 SetupAppData(app);
 
