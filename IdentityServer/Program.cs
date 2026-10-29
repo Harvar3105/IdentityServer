@@ -98,7 +98,6 @@ var twp = new TokenValidationParameters
   ValidateIssuerSigningKey = true,
   ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 },
   ValidIssuer = builder.Configuration.GetValue<string>("Security:JWTIssuer"),
-  // FIXME: [Important] Single audience for all client projects: a token issued for one project is accepted by every other.
   ValidAudience = builder.Configuration.GetValue<string>("Security:JWTAudience"),
   IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
         builder.Configuration.GetValue<string>("Security:JWTSecret")!

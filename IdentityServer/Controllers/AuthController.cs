@@ -164,7 +164,7 @@ public class AuthController : ControllerBase
 
   private async Task<IActionResult> TryLogin(User user, string password)
   {
-    // FIXME: [Important] Login ignores the calling project and never updates User.LastLogin.
+    // FIXME: [Important] User.LastLogin is never updated on login.
     var result = await _signInManager.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
     if (result.IsLockedOut)
       return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");

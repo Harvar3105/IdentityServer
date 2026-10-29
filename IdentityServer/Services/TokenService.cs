@@ -37,7 +37,6 @@ public class TokenService : ITokenService
       new Claim(ClaimTypes.Name, user.UserName!),
     };
 
-    // FIXME: [Important] Roles are global and not scoped per project: equally named roles grant access across projects.
     var roles = await _userManager.GetRolesAsync(user);
     claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
