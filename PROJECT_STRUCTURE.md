@@ -98,7 +98,10 @@ All routes are prefixed with `api/[controller]`.
 | POST   | `/api/auth/login`      | none   | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
 | POST   | `/api/token/refresh`   | none   | Rotates a refresh token and issues a new access token |
 | POST   | `/api/token/validate`  | none   | Validates an access token passed as a raw JSON string body |
-| —      | `/api/manage/*`        | `ADMIN` (partly) | `AsignRole`, `RemoveRole`, `GetUserRoles`, `CheckUserRole` — no HTTP verb/route attributes yet |
+| POST   | `/api/manage/assign-role` | `ADMIN` | Body `{ userId, role }`; assigns a role (except `ADMIN`) |
+| POST   | `/api/manage/remove-role` | `ADMIN` | Body `{ userId, role }`; removes a role (except `ADMIN`) |
+| GET    | `/api/manage/user-roles?userId=` | none | Lists the user's roles |
+| GET    | `/api/manage/has-role?userId=&role=` | none | Returns whether the user has the role |
 
 ## Token Model
 

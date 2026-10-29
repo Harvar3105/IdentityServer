@@ -1,3 +1,4 @@
+using IdentityServer.Domain.Dtos;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -5,8 +6,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace IdentityServer.Controllers;
 
-// FIXME: [Crit] Actions have no HTTP method or route attributes, so all of them map to "api/Manage"
-// and every request fails with AmbiguousMatchException.
 [Route("api/[controller]")]
 [ApiController]
 public class ManageController : ControllerBase
@@ -19,58 +18,52 @@ public class ManageController : ControllerBase
   }
 
   [Authorize(Roles = "ADMIN")]
-  public async Task<IActionResult> AsignRole([FromBody] DataModel data)
+  [HttpPost("assign-role")]
+  public async Task<IActionResult> AssignRole([FromBody] UserRoleRequest request)
   {
-    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
-    if (data.role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
+    if (request.Role.Equals("ADMIN")) return BadRequest("Assigning highest overall role is forbidden!");
 
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    var success = await _userManager.AddToRoleAsync(user, data.role);
-    if (!success.Succeeded) return BadRequest($"Cannot assign {data.role} to user!");
+    var success = await _userManager.AddToRoleAsync(user, request.Role);
+    if (!success.Succeeded) return BadRequest($"Cannot assign {request.Role} to user!");
 
     return Ok("Assigned");
   }
 
   [Authorize(Roles = "ADMIN")]
-  public async Task<IActionResult> RemoveRole([FromBody] DataModel data)
+  [HttpPost("remove-role")]
+  public async Task<IActionResult> RemoveRole([FromBody] UserRoleRequest request)
   {
-    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
-    if (data.role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
+    if (request.Role.Equals("ADMIN")) return BadRequest("Cannot remove highest role!");
 
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(request.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    var success = await _userManager.RemoveFromRoleAsync(user, data.role);
-    if (!success.Succeeded) return BadRequest($"Cannot remove {data.role} from user!");
+    var success = await _userManager.RemoveFromRoleAsync(user, request.Role);
+    if (!success.Succeeded) return BadRequest($"Cannot remove {request.Role} from user!");
 
     return Ok("Removed");
   }
 
   // FIXME: [Crit] No [Authorize]: anyone can read the roles of any user by id.
-  public async Task<IActionResult> GetUserRoles([FromBody] DataModel data)
+  [HttpGet("user-roles")]
+  public async Task<IActionResult> GetUserRoles([FromQuery] Guid userId)
   {
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
     return Ok(await _userManager.GetRolesAsync(user));
   }
 
   // FIXME: [Crit] No [Authorize]: anyone can probe the roles of any user by id.
-  public async Task<IActionResult> CheckUserRole([FromBody] DataModel data)
+  [HttpGet("has-role")]
+  public async Task<IActionResult> CheckUserRole([FromQuery] Guid userId, [FromQuery] string role)
   {
-    if (string.IsNullOrEmpty(data.role)) return BadRequest("Role must be specified!");
-
-    var user = await _userManager.FindByIdAsync(data.userId.ToString());
+    var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(data.role)));
-  }
-
-  public class DataModel
-  {
-    public required Guid userId { get; set; }
-    public required string? role { get; set; }
+    return Ok((await _userManager.GetRolesAsync(user)).Any(r => r.Equals(role)));
   }
 }
