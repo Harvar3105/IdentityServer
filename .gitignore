@@ -34,10 +34,10 @@ Desktop.ini
 # JetBrains Rider specific
 .idea/
 
-# Ignore Docker-related files (if any)
-Dockerfile
-docker-compose.yml
-.dockerignore
+# Docker secrets: only the templates are committed
+.env
+instances/*.env
+!instances/example.env
 
 # NPM packages (if using Node.js or front-end build tools)
 node_modules/

@@ -1,44 +1,22 @@
-version: '3.8'
+# One IdentityServer instance per client project; every instance has its own env file and database.
+#   docker compose --env-file instances/<project>.env up -d --build
+# Requires the shared SQL Server from docker-compose.db.yml.
 
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: sqlserver
-    environment:
-      - ACCEPT_EULA=Y
-      # FIXME: [Crit] Hard-coded SA password committed to the repository; move to an .env file or secrets.
-      - SA_PASSWORD=1234!AbcD
-      - MSSQL_PID=Express
-    ports:
-      - "1433:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-    healthcheck:
-      test: [ "CMD", "nc", "-z", "localhost", "1433" ]
-      interval: 30s
-      retries: 5
-      start_period: 10s
-    networks:
-      - shared-network
-  
   authserver:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: authserver
-    environment:
-      # FIXME: [Crit] Container runs in Development, which enables request body logging (plain-text passwords).
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=IdentityServerDB;User Id=sa;Password=1234!AbcD;TrustServerCertificate=true;
+    image: identityserver:latest
+    restart: unless-stopped
+    env_file:
+      - ${INSTANCE_ENV_FILE:?INSTANCE_ENV_FILE is not set}
+    volumes:
+      - ${ROLES_FILE:?ROLES_FILE is not set}:/app/Seed/roles.json:ro
     ports:
-      - "8080:8080"
-    depends_on:
-      - sqlserver 
+      - "${AUTH_PORT:?AUTH_PORT is not set}:8080"
     networks:
       - shared-network
-
-volumes:
-  sqlserver_data:
 
 networks:
   shared-network:

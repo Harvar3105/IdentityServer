@@ -1,0 +1,8 @@
+{
+  "Roles": {
+    "Available": [ "USER", "ADMIN" ],
+    "Initial": "USER",
+    "Root": "ADMIN",
+    "Managers": []
+  }
+}
