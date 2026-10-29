@@ -121,12 +121,16 @@ if (builder.Environment.IsDevelopment())
   builder.Services.AddSwaggerGen();
 }
 
-// FIXME: [Crit] Seed/ is git-ignored and no example file exists, so a fresh clone fails on startup here.
-builder.Configuration.AddJsonFile(
-  "Seed/seedsettings.json",
-  optional: false,
-  reloadOnChange: false
-);
+if (builder.Environment.IsDevelopment())
+{
+  builder.Configuration.AddJsonFile(
+    "Seed/seedsettings.json",
+    optional: true,
+    reloadOnChange: false
+  );
+}
+// TODO: Projects (API keys, roles) are runtime configuration required in production, not seed data;
+// move them from the "Seed" section into a dedicated "Projects" section.
 builder.Services.Configure<SeedSettings>(
   builder.Configuration.GetSection("Seed")
 );
@@ -191,6 +195,9 @@ static void SetupAppData(WebApplication app)
     }).Result;
     if (!result.Succeeded) Console.WriteLine(result.ToString());
   }
+
+  // Project roles above are needed by registration in every environment; seeded users are development data only.
+  if (!app.Environment.IsDevelopment()) return;
 
   foreach (var user in seedSettings.Users)
   {

@@ -70,5 +70,4 @@ log/
 tmp/
 
 
-# FIXME: [Crit] Seed/seedsettings.json is required at startup; commit a seedsettings.example.json template.
 Seed/
