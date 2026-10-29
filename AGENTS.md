@@ -1,7 +1,9 @@
 # Agent Guidelines
 
 This repository is a reusable authentication and authorization server: it manages user
-authentication data and the token lifecycle for multiple client projects.
+authentication data and the token lifecycle. It is single-tenant: one Docker image is deployed
+as a separate container per client project, each with its own database and configuration.
+Do not add per-project (tenant) scoping to the code; per-project differences belong in configuration.
 See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the layout, configuration and API.
 
 ## Rules

@@ -2,40 +2,46 @@
 
 ## Purpose
 
-A reusable, standalone authentication and authorization server. It owns user credentials,
-roles and the token lifecycle (JWT access tokens + rotating refresh tokens) so that multiple
-client projects can share one identity backend instead of implementing their own.
+A reusable authentication and authorization server. It owns user credentials, roles and the
+token lifecycle (JWT access tokens + rotating refresh tokens) so that client projects do not
+implement their own.
 
-Client projects identify themselves with a `Project` request header carrying the project's
-API key; the key determines which initial role a newly registered user receives.
+**Deployment model: single-tenant.** The code is built into one Docker image, and every client
+project gets its own container with its own database, JWT secret, roles and CORS origins.
+There are no shared accounts across projects. Per-project differences live in configuration
+only; the code is never copied per project.
 
 ## Tech Stack
 
-| Area            | Technology                                                    |
-|-----------------|---------------------------------------------------------------|
-| Runtime         | .NET 10 (`net10.0`), ASP.NET Core Web API                     |
-| Identity        | ASP.NET Core Identity (`User`/`Role` with `Guid` keys)        |
-| Tokens          | JWT Bearer (HMAC-SHA256), custom refresh tokens stored in DB  |
-| Persistence     | Entity Framework Core 9 + SQL Server                          |
-| API docs        | Swagger (Swashbuckle) + built-in OpenAPI (Development only)   |
-| Containerization| Dockerfile (multi-stage) + docker-compose (SQL Server 2022)   |
-
-`Duende.IdentityServer` is referenced but currently used only for the `IsNullOrEmpty()`
-string extension; the server does not use Duende's OAuth/OIDC pipeline.
+| Area             | Technology                                                   |
+|------------------|--------------------------------------------------------------|
+| Runtime          | .NET 10 (`net10.0`), ASP.NET Core Web API                    |
+| Identity         | ASP.NET Core Identity (`User`/`Role` with `Guid` keys)       |
+| Tokens           | JWT Bearer (HMAC-SHA256), refresh tokens stored as SHA-256 hashes |
+| Persistence      | Entity Framework Core 9 + SQL Server                         |
+| Protection       | Account lockout, per-IP rate limiting on `/api/auth/*`       |
+| API docs         | Swagger + OpenAPI (Development only)                         |
+| Containerization | Dockerfile (multi-stage), docker-compose per instance + shared SQL Server |
 
 ## Directory Layout
 
-```
+```text
 IdentityServer/                      # repository root
 ├── .editorconfig                    # LF, UTF-8, 2-space indent for C#
-├── .gitignore                       # also ignores appsettings*.json, Migrations/, Seed/
+├── .gitignore                       # ignores appsettings*.json, Seed/, .env, instances/*.env
+├── .dockerignore                    # keeps bin/obj, .env and instances/ out of the image
+├── .env.example                     # template for .env (SQL Server SA password)
 ├── Dockerfile                       # SDK build stage -> aspnet runtime stage
-├── docker-compose.yml               # sqlserver + authserver on external "shared-network"
+├── docker-compose.db.yml            # shared SQL Server, started once per host
+├── docker-compose.yml               # one IdentityServer instance, parameterized by an env file
+├── instances/
+│   ├── example.env                  # template for instances/<project>.env (git-ignored copies)
+│   └── example.roles.json           # roles mounted into the container as Seed/roles.json
 ├── IdentityServer.sln
 └── IdentityServer/                  # the single Web API project
     ├── IdentityServer.csproj
     ├── IdentityServer.http          # HTTP scratch requests (still the template stub)
-    ├── Program.cs                   # DI, auth, CORS, pipeline, DB migration + seeding
+    ├── Program.cs                   # configuration, DI, auth, CORS, pipeline, migration + seeding
     ├── ApplicationDbContext.cs      # IdentityDbContext + RefreshTokens DbSet
     ├── appsettings.json             # git-ignored, production config
     ├── appsettings.Development.json # git-ignored, development config
@@ -44,11 +50,12 @@ IdentityServer/                      # repository root
     ├── Controllers/
     │   ├── AuthController.cs        # register / login; also defines shared DataModel
     │   ├── TokenController.cs       # refresh / validate
-    │   └── ManageController.cs      # role management for ADMIN users
+    │   └── ManageController.cs      # role management (root / manager roles)
     ├── Domain/
     │   ├── Dtos/
     │   │   ├── ResponseDTO.cs       # common response envelope
-    │   │   └── UserDTO.cs           # public user projection
+    │   │   ├── UserDTO.cs           # public user projection
+    │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
     │   ├── Entities/                # namespace: IdentityServer.Entities
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
@@ -56,88 +63,122 @@ IdentityServer/                      # repository root
     │   │   └── RefreshToken.cs      # hash, expiry, revocation, rotation chain
     │   └── Services/
     │       ├── ITokenService.cs     # token service contract
-    │       └── SeedSettings.cs      # options model for Seed/seedsettings.json
+    │       ├── RoleSettings.cs      # options model for the "Roles" section
+    │       └── SeedSettings.cs      # options model for development seed users
     ├── Services/
-    │   └── TokenService.cs          # JWT creation/validation, refresh-token rotation
+    │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, revocation
     ├── Middleware/
-    │   └── RequestLoggingMiddleware.cs  # Development-only request/response logging
-    ├── Migrations/                  # git-ignored EF Core migrations (InitialCreate)
-    └── Seed/
-        └── seedsettings.json        # git-ignored projects, roles, API keys, seed users
+    │   ├── RateLimitPolicies.cs     # rate limiter policy names
+    │   └── RequestLoggingMiddleware.cs  # Development-only logging with secrets masked
+    ├── Migrations/                  # EF Core migrations (InitialCreate)
+    └── Seed/                        # git-ignored
+        ├── roles.json               # "Roles" section, loaded in every environment
+        └── users.json               # seed users with their roles, loaded in Development only
 ```
 
 ## Configuration
 
-Loaded in `Program.cs`: `appsettings.Development.json` (Development) or `appsettings.json`
-(other environments), then environment variables, then `Seed/seedsettings.json`.
+Sources in load order (later ones override earlier ones):
 
-| Key                                   | Meaning                                  |
-|---------------------------------------|------------------------------------------|
-| `ConnectionStrings:DefaultConnection` | SQL Server connection string             |
-| `Security:JWTSecret`                  | HMAC signing key                         |
-| `Security:JWTIssuer` / `JWTAudience`  | Expected issuer / audience               |
-| `Security:JWTExpiration`              | Access token lifetime, minutes           |
-| `Security:RTExpiration`               | Refresh token lifetime, days             |
-| `Security:CredentialRateLimitPermits` | Max requests per IP to `/api/auth/*` per window |
-| `Security:CredentialRateLimitWindowSeconds` | Rate limit window, seconds         |
-| `Security:LockoutMaxFailedAttempts`   | Failed password attempts before account lockout |
-| `Security:LockoutDurationMinutes`     | Account lockout duration, minutes        |
-| `Security:LockoutAllowedForNewUsers`  | Whether newly created users can be locked out |
-| `Security:Password`                   | Identity `PasswordOptions`: `RequiredLength` (8), `RequiredUniqueChars`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`, `RequireNonAlphanumeric` |
-| `Seed:Projects[]`                     | `Name`, `API_KEY`, `Roles { Admin[], User[], Initial }` |
-| `Seed:Users[]`                        | `Username`, `Email`, `Password`, `Roles[]` |
+1. `appsettings.Development.json` (Development) or `appsettings.json` (other environments)
+2. `Seed/roles.json` (optional, every environment)
+3. `Seed/users.json` (optional, Development only)
+4. Environment variables (`Section__Key`, e.g. `Security__JWTSecret`)
 
-On startup `SetupAppData` applies EF migrations (unless the provider is InMemory), creates
-every role declared by the seeded projects, and creates/updates the seeded users.
+Missing required keys stop the application at startup with an explicit error.
+
+### `Security`
+
+| Key                                | Meaning                                              |
+|------------------------------------|------------------------------------------------------|
+| `JWTSecret`                        | HMAC signing key (at least 32 bytes)                 |
+| `JWTIssuer` / `JWTAudience`        | Issuer / audience of this instance                   |
+| `JWTExpiration`                    | Access token lifetime, minutes                       |
+| `RTExpiration`                     | Refresh token lifetime, days                         |
+| `CredentialRateLimitPermits`       | Max requests per IP to `/api/auth/*` per window      |
+| `CredentialRateLimitWindowSeconds` | Rate limit window, seconds                           |
+| `LockoutMaxFailedAttempts`         | Failed password attempts before account lockout      |
+| `LockoutDurationMinutes`           | Account lockout duration, minutes                    |
+| `LockoutAllowedForNewUsers`        | Whether newly created users can be locked out        |
+| `Password`                         | Identity `PasswordOptions`: `RequiredLength`, `RequiredUniqueChars`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`, `RequireNonAlphanumeric` |
+| `AllowedOrigins`                   | CORS origins allowed to call the API from a browser; empty blocks all |
+
+Plus `ConnectionStrings:DefaultConnection` for SQL Server.
+
+### `Roles`
+
+| Key         | Meaning                                                                |
+|-------------|------------------------------------------------------------------------|
+| `Available` | Every role of the instance; all are created at startup                 |
+| `Initial`   | Role assigned on registration; must not be root or a manager role      |
+| `Root`      | Role with absolute rights; only its holders can grant or revoke it     |
+| `Managers`  | Roles that can grant or revoke ordinary roles (not root, not managers) |
+
+What each role is allowed to do inside a client project is decided by that project from the
+role claims in the JWT.
+
+### `Seed` (Development only)
+
+`Seed:Users[]` with `Username`, `Email`, `Password`, `Roles[]`. The seed defines the exact
+role set of each seeded user; users with roles missing from `Roles:Available` are skipped.
 
 ## HTTP API
 
-All routes are prefixed with `api/[controller]`.
+| Method | Route                                  | Auth                    | Description |
+|--------|----------------------------------------|-------------------------|-------------|
+| POST   | `/api/auth/register`                   | none, rate limited      | Creates a user with `Roles:Initial`, returns user + tokens |
+| POST   | `/api/auth/login`                      | none, rate limited      | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
+| POST   | `/api/token/refresh`                   | none                    | Rotates a refresh token and issues a new access token |
+| POST   | `/api/token/validate`                  | none                    | Validates an access token passed as a raw JSON string body |
+| POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available` |
+| POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role |
+| GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Lists the user's roles |
+| GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns whether the user has the role |
 
-| Method | Route                  | Auth   | Description |
-|--------|------------------------|--------|-------------|
-| POST   | `/api/auth/register`   | none + `Project` header | Creates a user, assigns the project's initial role, returns user + tokens |
-| POST   | `/api/auth/login`      | none   | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
-| POST   | `/api/token/refresh`   | none   | Rotates a refresh token and issues a new access token |
-| POST   | `/api/token/validate`  | none   | Validates an access token passed as a raw JSON string body |
-| POST   | `/api/manage/assign-role` | `ADMIN` | Body `{ userId, role }`; assigns a role (except `ADMIN`) |
-| POST   | `/api/manage/remove-role` | `ADMIN` | Body `{ userId, role }`; removes a role (except `ADMIN`) |
-| GET    | `/api/manage/user-roles?userId=` | self or `ADMIN` | Lists the user's roles |
-| GET    | `/api/manage/has-role?userId=&role=` | self or `ADMIN` | Returns whether the user has the role |
+`refreshTokenHash` in request bodies carries the raw refresh token despite its name.
 
 ## Token Model
 
-- **Access token**: JWT with `sub` (user id), `jti`, `ClaimTypes.Name`, and one
+- **Access token**: JWT with `sub` (user id), `jti`, `ClaimTypes.Name` and one
   `ClaimTypes.Role` per role. Validated with the singleton `TokenValidationParameters`
-  registered in `Program.cs` (1 minute clock skew).
-- **Refresh token**: 64 random bytes, SHA-256 hashed and stored in `RefreshTokens`.
-  Rotation revokes the old token (`RevokedAt`, `RevokedByIp`, `ReplacedByTokenHash`)
-  and stores a new one. Deleted in cascade with the user.
+  registered in `Program.cs` (1 minute clock skew). JWT Bearer is the default authentication
+  scheme (overriding the cookie defaults set by `AddIdentity`).
+- **Refresh token**: 64 random bytes. The client receives the raw value; only its SHA-256 hash
+  is stored. Every password login creates an independent session (token).
+- **Rotation**: the old token is revoked by a conditional `UPDATE` inside a transaction, so of
+  several concurrent requests with the same token only one succeeds.
+- **Reuse detection**: presenting an already revoked token revokes all active refresh tokens
+  of its user.
 
 ## Request Pipeline (Program.cs order)
 
-`RequestLoggingMiddleware` (Dev) → OpenAPI (Dev) → Swagger → Routing → Authentication →
-Authorization → MapControllers → HttpsRedirection → CORS (`AllowAll`).
+`RequestLoggingMiddleware`, OpenAPI, Swagger (Development only) → HttpsRedirection → Routing →
+CORS → RateLimiter → Authentication → Authorization → MapControllers.
 
-## Known Issues Found During Review
+## Deployment
 
-These should be marked in code with `FIXME:` / `TODO:` as they are addressed (see `AGENTS.md`).
+```bash
+docker network create shared-network                     # once per host
+cp .env.example .env                                     # set MSSQL_SA_PASSWORD
+docker compose -f docker-compose.db.yml up -d            # shared SQL Server, once per host
+cp instances/example.env instances/<project>.env         # per project: port, DB, secrets, origins
+docker compose --env-file instances/<project>.env up -d --build
+```
 
-- `ManageController` actions have no `[HttpPost]`/`[HttpGet]` attributes, so they are not
-  reachable as intended; `GetUserRoles` and `CheckUserRole` have no `[Authorize]`.
-- The refresh token returned to clients is the stored **hash**; the raw token is discarded,
-  so a database leak exposes usable refresh tokens.
-- `AuthController.Register` validates the `Project` header **after** the user is created.
-- `SetupAppData` calls `AddToRolesAsync(parsed, ...)` on the unsaved object instead of
-  `existingUser`, and does not remove roles absent from the seed.
-- `TryLogin` rotates the latest refresh token even if it is already revoked/expired;
-  `LastLogin` is never updated on login.
-- `RequestLoggingMiddleware` logs request bodies, including plain-text passwords.
-- CORS and HTTPS redirection are registered after `MapControllers`; CORS allows any origin.
-- Password policy requires only 4 characters.
-- `docker-compose.yml` contains a hard-coded SA password.
+Each instance needs its own `COMPOSE_PROJECT_NAME`, `AUTH_PORT`, database name, `JWTSecret`
+and roles file.
+
+## Known Issues
+
+Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
+
+- Internal exception messages are returned to the client (`AuthController`, `TokenController`).
+- `User.LastLogin` is never updated on login.
+- `SecurityStamp` is not checked, so role changes do not affect already issued access tokens.
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- Two unrelated `DataModel` classes exist (`AuthController` and nested in `ManageController`);
-  `ResponseDTO.IsAaccessTokenValid` is misspelled; `IdentityServer.http` is a template stub.
-- Namespace `IdentityServer.Entities` does not match folder `Domain/Entities`;
-  `SeedSettings` is an options model located under `Domain/Services`.
+- `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).
+- Refresh tokens have no `FamilyId`, so reuse detection revokes every session of the user.
+- Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
+- `appsettings.json` is git-ignored, so an image built from a fresh clone cannot start in Production.
+- All instances connect to SQL Server as `sa`; a dedicated login per instance is preferable.
+- No logout endpoint and no cleanup of expired/revoked refresh tokens yet.
