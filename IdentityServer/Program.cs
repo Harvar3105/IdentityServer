@@ -38,18 +38,18 @@ var lockoutMaxFailedAttempts = builder.Configuration.GetValue<int?>("Security:Lo
 var lockoutDuration = TimeSpan.FromMinutes(
   builder.Configuration.GetValue<int?>("Security:LockoutDurationMinutes")
   ?? throw new InvalidOperationException("Security:LockoutDurationMinutes is not configured."));
+var lockoutAllowedForNewUsers = builder.Configuration.GetValue<bool?>("Security:LockoutAllowedForNewUsers")
+  ?? throw new InvalidOperationException("Security:LockoutAllowedForNewUsers is not configured.");
+
+var passwordPolicySection = builder.Configuration.GetSection("Security:Password");
+if (!passwordPolicySection.Exists())
+  throw new InvalidOperationException("Security:Password is not configured.");
 
 builder.Services.AddIdentity<User, Role>(options =>
   {
-    options.Password.RequireDigit = true;
-    options.Password.RequireLowercase = true;
-    options.Password.RequireNonAlphanumeric = false;
-    options.Password.RequireUppercase = true;
-    // FIXME: [Important] 4-character minimum is too weak; NIST SP 800-63B requires at least 8.
-    options.Password.RequiredLength = 4;
-    options.Password.RequiredUniqueChars = 0;
+    passwordPolicySection.Bind(options.Password);
 
-    options.Lockout.AllowedForNewUsers = true;
+    options.Lockout.AllowedForNewUsers = lockoutAllowedForNewUsers;
     options.Lockout.MaxFailedAccessAttempts = lockoutMaxFailedAttempts;
     options.Lockout.DefaultLockoutTimeSpan = lockoutDuration;
   })

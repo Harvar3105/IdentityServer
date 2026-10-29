@@ -82,6 +82,8 @@ Loaded in `Program.cs`: `appsettings.Development.json` (Development) or `appsett
 | `Security:CredentialRateLimitWindowSeconds` | Rate limit window, seconds         |
 | `Security:LockoutMaxFailedAttempts`   | Failed password attempts before account lockout |
 | `Security:LockoutDurationMinutes`     | Account lockout duration, minutes        |
+| `Security:LockoutAllowedForNewUsers`  | Whether newly created users can be locked out |
+| `Security:Password`                   | Identity `PasswordOptions`: `RequiredLength` (8), `RequiredUniqueChars`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`, `RequireNonAlphanumeric` |
 | `Seed:Projects[]`                     | `Name`, `API_KEY`, `Roles { Admin[], User[], Initial }` |
 | `Seed:Users[]`                        | `Username`, `Email`, `Password`, `Roles[]` |
 
