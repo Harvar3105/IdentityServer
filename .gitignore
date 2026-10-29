@@ -51,10 +51,6 @@ node_modules/
 # Ignore the publish output of .NET Core projects
 publish/
 
-# Migrations
-# FIXME: [Crit] Migrations must be committed; without them Database.Migrate() creates no tables on a fresh clone.
-Migrations/
-
 # Ignore temporary files and logs
 *.log
 *.bak

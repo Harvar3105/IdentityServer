@@ -171,7 +171,6 @@ static void SetupAppData(WebApplication app)
       .CreateScope();
   using var context = serviceScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-  // FIXME: [Crit] Migrations/ is git-ignored, so on a fresh clone no tables are created.
   if (!context.Database.ProviderName!.Contains("InMemory"))
   {
     context.Database.Migrate();
