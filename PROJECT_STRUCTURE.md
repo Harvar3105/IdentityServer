@@ -63,11 +63,13 @@ IdentityServer/                      # repository root
     │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain
     │   │   └── ProfilePicture.cs    # uploaded image bytes + metadata, one per user (own table)
     │   └── Services/
+    │       ├── ImageContentTypes.cs # MIME types of the image formats the server can inspect
     │       ├── ITokenService.cs     # token service contract
     │       ├── ProfilePictureSettings.cs  # options model for the "ProfilePicture" section
     │       ├── RoleSettings.cs      # options model for the "Roles" section
     │       └── SeedSettings.cs      # options model for development seed users
     ├── Services/
+    │   ├── ImageInspector.cs        # format detection by signature + width/height from JPEG/PNG/WebP headers
     │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, revocation
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
