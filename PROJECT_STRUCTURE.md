@@ -50,9 +50,14 @@ IdentityServer/                      # repository root
     ├── Controllers/
     │   ├── AuthController.cs        # register / login; also defines shared DataModel
     │   ├── TokenController.cs       # refresh / validate
-    │   └── ManageController.cs      # role management (root / manager roles)
+    │   ├── ManageController.cs      # role management (root / manager roles)
+    │   └── ProfilePictureController.cs  # upload / get (ETag, 304) / delete profile picture
+    ├── Filters/
+    │   └── ProfilePictureUploadLimitFilter.cs  # request body + multipart limits from ProfilePicture:MaxSizeBytes
     ├── Domain/
     │   ├── Dtos/
+    │   │   ├── ImageInfo.cs         # detected content type + width/height of an image
+    │   │   ├── ProfilePictureMetadata.cs  # picture metadata without the image bytes
     │   │   ├── ResponseDTO.cs       # common response envelope
     │   │   ├── UserDTO.cs           # public user projection
     │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
@@ -60,17 +65,28 @@ IdentityServer/                      # repository root
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
     │   │   ├── UserClaim.cs         # IdentityUserClaim<Guid>
-    │   │   └── RefreshToken.cs      # hash, expiry, revocation, rotation chain
+    │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain
+    │   │   └── ProfilePicture.cs    # uploaded image bytes + metadata, one per user (own table)
+    │   ├── Repositories/
+    │   │   └── IProfilePictureRepository.cs  # profile picture storage contract
     │   └── Services/
+    │       ├── ImageContentTypes.cs # MIME types of the image formats the server can inspect
+    │       ├── IProfilePictureService.cs  # profile picture service contract
     │       ├── ITokenService.cs     # token service contract
+    │       ├── ProfilePictureSettings.cs  # options model for the "ProfilePicture" section
+    │       ├── ProfilePictureUploadResult.cs  # upload result + validation error codes
     │       ├── RoleSettings.cs      # options model for the "Roles" section
     │       └── SeedSettings.cs      # options model for development seed users
+    ├── Repositories/
+    │   └── ProfilePictureRepository.cs  # EF Core storage in SQL Server, upsert without loading old bytes
     ├── Services/
+    │   ├── ImageInspector.cs        # format detection by signature + width/height from JPEG/PNG/WebP headers
+    │   ├── ProfilePictureService.cs # upload validation (size, format, dimensions), hashing, get / delete
     │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, revocation
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
-    │   └── RequestLoggingMiddleware.cs  # Development-only logging with secrets masked
-    ├── Migrations/                  # EF Core migrations (InitialCreate)
+    │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
+    ├── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures)
     └── Seed/                        # git-ignored
         ├── roles.json               # "Roles" section, loaded in every environment
         └── users.json               # seed users with their roles, loaded in Development only
@@ -117,6 +133,15 @@ Plus `ConnectionStrings:DefaultConnection` for SQL Server.
 What each role is allowed to do inside a client project is decided by that project from the
 role claims in the JWT.
 
+### `ProfilePicture`
+
+| Key                       | Meaning                                                                 |
+|---------------------------|-------------------------------------------------------------------------|
+| `MaxSizeBytes`            | Max upload size, bytes                                                  |
+| `MinWidth` / `MinHeight`  | Min image dimensions, pixels                                            |
+| `MaxWidth` / `MaxHeight`  | Max image dimensions, pixels; must not be less than the minimums        |
+| `AllowedContentTypes`     | Non-empty subset of `image/jpeg`, `image/png`, `image/webp`             |
+
 ### `Seed` (Development only)
 
 `Seed:Users[]` with `Username`, `Email`, `Password`, `Roles[]`. The seed defines the exact
@@ -134,6 +159,16 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 | POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role |
 | GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Lists the user's roles |
 | GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns whether the user has the role |
+| PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns its metadata |
+| GET    | `/api/profilePicture/{userId}`         | none                    | Image bytes with `ETag`/`Last-Modified`; `If-None-Match` gives 304 |
+| DELETE | `/api/profilePicture`                  | any authenticated user  | Deletes the caller's picture; 404 if there is none |
+| DELETE | `/api/profilePicture/{userId}`         | root or manager         | Moderation: deletes a user's picture (cannot replace it); managers cannot target root or manager holders; logged |
+
+Profile picture uploads are checked against the `ProfilePicture` section: the format is detected
+from the file signature (the client file name and Content-Type are ignored), then the format and
+dimensions are validated. Oversized uploads are rejected while reading: 413 from the service, or
+400 if the multipart body exceeds the limit before the file reaches it. Pictures are served with
+`X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`.
 
 `refreshTokenHash` in request bodies carries the raw refresh token despite its name.
 

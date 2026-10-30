@@ -52,7 +52,8 @@ public class RequestLoggingMiddleware
       }
     }
 
-    if (request.Method != "GET" && request.Method != "DELETE" && request.ContentLength > 0)
+    // Only JSON bodies are logged; reading a file upload here would buffer it before its size limit applies.
+    if (request.Method != "GET" && request.Method != "DELETE" && request.ContentLength > 0 && request.HasJsonContentType())
     {
       using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
       var body = await reader.ReadToEndAsync();
