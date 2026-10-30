@@ -1,9 +1,8 @@
 using System.Buffers.Binary;
+using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 
 namespace IdentityServer.Services;
-
-public record ImageInfo(string ContentType, int Width, int Height);
 
 // Detects the format by its signature and reads dimensions from the header; the client file name,
 // extension and Content-Type are never trusted. Only the header is parsed, the image itself is not decoded.

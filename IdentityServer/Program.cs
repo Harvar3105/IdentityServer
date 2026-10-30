@@ -2,9 +2,11 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using IdentityServer;
+using IdentityServer.Domain.Repositories;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using IdentityServer.Middleware;
+using IdentityServer.Repositories;
 using IdentityServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -66,6 +68,8 @@ builder.Services.AddIdentity<User, Role>(options =>
   .AddDefaultTokenProviders();
 
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IProfilePictureRepository, ProfilePictureRepository>();
+builder.Services.AddScoped<IProfilePictureService, ProfilePictureService>();
 
 var credentialRateLimitPermits = builder.Configuration.GetValue<int?>("Security:CredentialRateLimitPermits")
   ?? throw new InvalidOperationException("Security:CredentialRateLimitPermits is not configured.");

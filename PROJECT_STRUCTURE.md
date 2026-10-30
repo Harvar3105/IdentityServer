@@ -53,6 +53,8 @@ IdentityServer/                      # repository root
     │   └── ManageController.cs      # role management (root / manager roles)
     ├── Domain/
     │   ├── Dtos/
+    │   │   ├── ImageInfo.cs         # detected content type + width/height of an image
+    │   │   ├── ProfilePictureMetadata.cs  # picture metadata without the image bytes
     │   │   ├── ResponseDTO.cs       # common response envelope
     │   │   ├── UserDTO.cs           # public user projection
     │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
@@ -62,14 +64,21 @@ IdentityServer/                      # repository root
     │   │   ├── UserClaim.cs         # IdentityUserClaim<Guid>
     │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain
     │   │   └── ProfilePicture.cs    # uploaded image bytes + metadata, one per user (own table)
+    │   ├── Repositories/
+    │   │   └── IProfilePictureRepository.cs  # profile picture storage contract
     │   └── Services/
     │       ├── ImageContentTypes.cs # MIME types of the image formats the server can inspect
+    │       ├── IProfilePictureService.cs  # profile picture service contract
     │       ├── ITokenService.cs     # token service contract
     │       ├── ProfilePictureSettings.cs  # options model for the "ProfilePicture" section
+    │       ├── ProfilePictureUploadResult.cs  # upload result + validation error codes
     │       ├── RoleSettings.cs      # options model for the "Roles" section
     │       └── SeedSettings.cs      # options model for development seed users
+    ├── Repositories/
+    │   └── ProfilePictureRepository.cs  # EF Core storage in SQL Server, upsert without loading old bytes
     ├── Services/
     │   ├── ImageInspector.cs        # format detection by signature + width/height from JPEG/PNG/WebP headers
+    │   ├── ProfilePictureService.cs # upload validation (size, format, dimensions), hashing, get / delete
     │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, revocation
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
