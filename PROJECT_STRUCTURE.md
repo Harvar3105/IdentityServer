@@ -60,9 +60,11 @@ IdentityServer/                      # repository root
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
     │   │   ├── UserClaim.cs         # IdentityUserClaim<Guid>
-    │   │   └── RefreshToken.cs      # hash, expiry, revocation, rotation chain
+    │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain
+    │   │   └── ProfilePicture.cs    # uploaded image bytes + metadata, one per user (own table)
     │   └── Services/
     │       ├── ITokenService.cs     # token service contract
+    │       ├── ProfilePictureSettings.cs  # options model for the "ProfilePicture" section
     │       ├── RoleSettings.cs      # options model for the "Roles" section
     │       └── SeedSettings.cs      # options model for development seed users
     ├── Services/
@@ -70,7 +72,7 @@ IdentityServer/                      # repository root
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging with secrets masked
-    ├── Migrations/                  # EF Core migrations (InitialCreate)
+    ├── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures)
     └── Seed/                        # git-ignored
         ├── roles.json               # "Roles" section, loaded in every environment
         └── users.json               # seed users with their roles, loaded in Development only
@@ -116,6 +118,15 @@ Plus `ConnectionStrings:DefaultConnection` for SQL Server.
 
 What each role is allowed to do inside a client project is decided by that project from the
 role claims in the JWT.
+
+### `ProfilePicture`
+
+| Key                       | Meaning                                                                 |
+|---------------------------|-------------------------------------------------------------------------|
+| `MaxSizeBytes`            | Max upload size, bytes                                                  |
+| `MinWidth` / `MinHeight`  | Min image dimensions, pixels                                            |
+| `MaxWidth` / `MaxHeight`  | Max image dimensions, pixels; must not be less than the minimums        |
+| `AllowedContentTypes`     | Non-empty subset of `image/jpeg`, `image/png`, `image/webp`             |
 
 ### `Seed` (Development only)
 

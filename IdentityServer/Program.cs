@@ -147,6 +147,17 @@ builder.Services.AddOptions<RoleSettings>()
   .Validate(roles => roles.Managers.All(roles.IsAvailable), "Every Roles:Managers entry must be listed in Roles:Available.")
   .Validate(roles => !roles.IsPrivileged(roles.Initial), "Roles:Initial must not be the root or a manager role.")
   .ValidateOnStart();
+builder.Services.AddOptions<ProfilePictureSettings>()
+  .Bind(builder.Configuration.GetSection("ProfilePicture"))
+  .Validate(p => p.MaxSizeBytes > 0, "ProfilePicture:MaxSizeBytes must be greater than 0.")
+  .Validate(p => p.MinWidth > 0 && p.MinHeight > 0, "ProfilePicture:MinWidth and MinHeight must be greater than 0.")
+  .Validate(p => p.MaxWidth >= p.MinWidth && p.MaxHeight >= p.MinHeight,
+    "ProfilePicture:MaxWidth and MaxHeight must not be less than MinWidth and MinHeight.")
+  .Validate(p => p.AllowedContentTypes.Count > 0, "ProfilePicture:AllowedContentTypes must not be empty.")
+  .Validate(p => p.AllowedContentTypes.All(type =>
+      ProfilePictureSettings.SupportedContentTypes.Contains(type, StringComparer.OrdinalIgnoreCase)),
+    $"Every ProfilePicture:AllowedContentTypes entry must be one of: {string.Join(", ", ProfilePictureSettings.SupportedContentTypes)}.")
+  .ValidateOnStart();
 
 var app = builder.Build();
 
