@@ -22,6 +22,42 @@ namespace IdentityServer.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("IdentityServer.Entities.ProfilePicture", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("ProfilePictures");
+                });
+
             modelBuilder.Entity("IdentityServer.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -268,6 +304,17 @@ namespace IdentityServer.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("IdentityServer.Entities.ProfilePicture", b =>
+                {
+                    b.HasOne("IdentityServer.Entities.User", "User")
+                        .WithOne("ProfilePicture")
+                        .HasForeignKey("IdentityServer.Entities.ProfilePicture", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("IdentityServer.Entities.RefreshToken", b =>
                 {
                     b.HasOne("IdentityServer.Entities.User", "User")
@@ -337,6 +384,8 @@ namespace IdentityServer.Migrations
             modelBuilder.Entity("IdentityServer.Entities.User", b =>
                 {
                     b.Navigation("Claims");
+
+                    b.Navigation("ProfilePicture");
 
                     b.Navigation("RefreshTokens");
                 });
