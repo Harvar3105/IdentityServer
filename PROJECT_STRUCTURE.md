@@ -211,7 +211,6 @@ and roles file.
 
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
-- Internal exception messages are returned to the client (`AuthController`, `TokenController`).
 - `User.LastLogin` is never updated on login.
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).

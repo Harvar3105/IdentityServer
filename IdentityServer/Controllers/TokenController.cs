@@ -63,20 +63,12 @@ public class TokenController : ControllerBase
   [HttpPost("validate")]
   public async Task<IActionResult> ValidateToken([FromBody] string token)
   {
-    try
+    var principal = await _tokenService.ValidateAccessToken(token);
+    if (principal == null)
     {
-      var principal = await _tokenService.ValidateAccessToken(token);
-      if (principal == null)
-      {
-        return BadRequest(new { valid = false, error = "Invalid token" });
-      }
-      return Ok(new ResponseDTO { IsAaccessTokenValid = true });
+      return BadRequest(new { valid = false, error = "Invalid token" });
     }
-    catch (Exception ex)
-    {
-      // FIXME: [Important] Internal exception messages are leaked to the client.
-      return BadRequest(new { valid = false, error = ex.Message });
-    }
+    return Ok(new ResponseDTO { IsAaccessTokenValid = true });
   }
 
 }

@@ -64,62 +64,48 @@ public class AuthController : ControllerBase
   [HttpPost("login")]
   public async Task<IActionResult> Login([FromBody] DataModel model)
   {
-    try
+    if (model.Username != null)
     {
-      if (model.Username != null)
-      {
-        return await LoginByUsername(model);
-      }
-      else if (model.Email != null)
-      {
-        return await LoginByEmail(model);
-      }
-      else if (model.AccessToken != null || model.RefreshTokenHash != null)
-      {
-        return await LoginWithTokens(model);
-      }
+      return await LoginByUsername(model);
+    }
+    else if (model.Email != null)
+    {
+      return await LoginByEmail(model);
+    }
+    else if (model.AccessToken != null || model.RefreshTokenHash != null)
+    {
+      return await LoginWithTokens(model);
+    }
 
-      return BadRequest("Could not find suitable auth method!");
-    }
-    catch (Exception ex)
-    {
-      // FIXME: [Important] Internal exception messages are leaked to the client.
-      return BadRequest(new { Fail = "❌Could not login!", Reason = ex.Message });
-    }
+    return BadRequest("Could not find suitable auth method!");
   }
 
   private async Task<IActionResult> LoginWithTokens(DataModel model)
   {
-    try
+    var principal = string.IsNullOrEmpty(model.AccessToken)
+      ? null
+      : await _tokenService.ValidateAccessToken(model.AccessToken);
+    if (principal == null)
     {
-      var principal = await _tokenService.ValidateAccessToken(model.AccessToken!);
-      if (principal == null)
-      {
-        var login = await TryLoginWithRefreshToken(model.RefreshTokenHash!);
-        if (login != null) return Ok(new
-        {
-          User = new UserDTO(login.Value.User),
-          Roles = login.Value.Roles,
-          AccessToken = login.Value.NewJwt,
-          RefreshToken = login.Value.NewRt
-        });
-        throw new Exception("Invalid JWT!");
-      }
+      if (string.IsNullOrEmpty(model.RefreshTokenHash)) return Unauthorized("Invalid or expired token");
 
-      var user = await _userManager.GetUserAsync(principal);
-      if (user == null)
-      {
-        throw new Exception("User not found!");
-      }
+      var login = await TryLoginWithRefreshToken(model.RefreshTokenHash);
+      if (login == null) return Unauthorized("Invalid or expired token");
 
-      var roles = await _userManager.GetRolesAsync(user);
-      return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = roles});
+      return Ok(new
+      {
+        User = new UserDTO(login.Value.User),
+        Roles = login.Value.Roles,
+        AccessToken = login.Value.NewJwt,
+        RefreshToken = login.Value.NewRt
+      });
     }
-    catch (Exception ex)
-    {
-      // FIXME: [Important] Internal exception messages are leaked to the client.
-      return Unauthorized(ex.Message);
-    }
+
+    var user = await _userManager.GetUserAsync(principal);
+    if (user == null) return Unauthorized("Invalid or expired token");
+
+    var roles = await _userManager.GetRolesAsync(user);
+    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = roles});
   }
 
   private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
