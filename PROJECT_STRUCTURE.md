@@ -86,7 +86,7 @@ IdentityServer/                      # repository root
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
-    ├── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures)
+    ├── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation)
     └── Seed/                        # git-ignored
         ├── roles.json               # "Roles" section, loaded in every environment
         └── users.json               # seed users with their roles, loaded in Development only

@@ -26,6 +26,12 @@ public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClai
       .HasForeignKey(rt => rt.UserId)
       .OnDelete(DeleteBehavior.Cascade);
 
+    builder.Entity<User>()
+      .HasMany(u => u.Claims)
+      .WithOne()
+      .HasForeignKey(uc => uc.UserId)
+      .IsRequired();
+
     builder.Entity<ProfilePicture>(b =>
     {
       b.HasKey(p => p.UserId);

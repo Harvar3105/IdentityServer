@@ -213,14 +213,9 @@ namespace IdentityServer.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("UserId1")
-                        .HasColumnType("uniqueidentifier");
-
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
-
-                    b.HasIndex("UserId1");
 
                     b.ToTable("AspNetUserClaims", (string)null);
                 });
@@ -329,14 +324,10 @@ namespace IdentityServer.Migrations
             modelBuilder.Entity("IdentityServer.Entities.UserClaim", b =>
                 {
                     b.HasOne("IdentityServer.Entities.User", null)
-                        .WithMany()
+                        .WithMany("Claims")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("IdentityServer.Entities.User", null)
-                        .WithMany("Claims")
-                        .HasForeignKey("UserId1");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
