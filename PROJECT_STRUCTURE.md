@@ -211,7 +211,6 @@ and roles file.
 
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
-- `User.LastLogin` is never updated on login.
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).
 - Refresh tokens have no `FamilyId`, so reuse detection revokes every session of the user.

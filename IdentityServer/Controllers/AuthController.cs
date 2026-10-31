@@ -150,7 +150,6 @@ public class AuthController : ControllerBase
 
   private async Task<IActionResult> TryLogin(User user, string password)
   {
-    // FIXME: [Important] User.LastLogin is never updated on login.
     var result = await _signInManager.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
     if (result.IsLockedOut)
       return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");
@@ -162,6 +161,7 @@ public class AuthController : ControllerBase
     var accessToken = await _tokenService.GenerateAccessToken(user);
     var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
     _dbContext.RefreshTokens.Add(refreshToken);
+    user.LastLogin = DateTime.UtcNow;
     await _dbContext.SaveChangesAsync();
 
     return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
