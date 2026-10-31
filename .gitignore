@@ -51,6 +51,9 @@ node_modules/
 # Ignore the publish output of .NET Core projects
 publish/
 
+# Test results and coverage reports (see TESTING.md)
+TestResults/
+
 # Ignore temporary files and logs
 *.log
 *.bak
