@@ -22,6 +22,7 @@ only; the code is never copied per project.
 | Protection       | Account lockout, per-IP rate limiting on `/api/auth/*`       |
 | API docs         | Swagger + OpenAPI (Development only)                         |
 | Containerization | Dockerfile (multi-stage), docker-compose per instance + shared SQL Server |
+| Tests            | xUnit + EF Core SQLite in-memory                             |
 
 ## Directory Layout
 
@@ -38,7 +39,15 @@ IdentityServer/                      # repository root
 │   ├── example.env                  # template for instances/<project>.env (git-ignored copies)
 │   └── example.roles.json           # roles mounted into the container as Seed/roles.json
 ├── IdentityServer.sln
-└── IdentityServer/                  # the single Web API project
+├── IdentityServer.Tests/            # xUnit tests (`dotnet test`), not part of the Docker image
+│   └── Unit/                        # unit tests; folders mirror the Web API project
+│       ├── Entities/
+│       │   └── RefreshTokenTests.cs # IsExpired / IsActive
+│       └── Services/
+│           ├── TokenServiceFixture.cs    # real TokenService + Identity on SQLite in-memory (ExecuteUpdate support)
+│           ├── TokenServiceAccessTokenTests.cs   # JWT claims, signature/issuer/audience/alg/lifetime checks, security stamp
+│           └── TokenServiceRefreshTokenTests.cs  # hashing, lookup, rotation, single-use revocation, reuse detection
+└── IdentityServer/                  # the Web API project
     ├── IdentityServer.csproj
     ├── IdentityServer.http          # HTTP scratch requests (still the template stub)
     ├── Program.cs                   # configuration, DI, auth, CORS, pipeline, migration + seeding
