@@ -92,7 +92,7 @@ public class AuthController : ControllerBase
   {
     try
     {
-      var principal = _tokenService.ValidateAccessToken(model.AccessToken!);
+      var principal = await _tokenService.ValidateAccessToken(model.AccessToken!);
       if (principal == null)
       {
         var login = await TryLoginWithRefreshToken(model.RefreshTokenHash!);

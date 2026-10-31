@@ -12,6 +12,8 @@ namespace IdentityServer.Services;
 
 public class TokenService : ITokenService
 {
+  private const string SecurityStampClaimType = "sstamp";
+
   private readonly IConfiguration _config;
   private readonly TokenValidationParameters _twp;
   private readonly JwtSecurityTokenHandler _tokenHandler = new();
@@ -35,6 +37,8 @@ public class TokenService : ITokenService
       new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
       new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
       new Claim(ClaimTypes.Name, user.UserName!),
+      // Hashed because the raw stamp is the key of Identity's TOTP token providers and the JWT payload is readable.
+      new Claim(SecurityStampClaimType, HashToken(await _userManager.GetSecurityStampAsync(user))),
     };
 
     var roles = await _userManager.GetRolesAsync(user);
@@ -56,8 +60,7 @@ public class TokenService : ITokenService
     return new JwtSecurityTokenHandler().WriteToken(token);
   }
 
-  // FIXME: [Important] SecurityStamp is not checked: role changes and revocations do not affect issued tokens until expiry.
-  public ClaimsPrincipal? ValidateAccessToken(string token, bool validateLifetime = true)
+  public async Task<ClaimsPrincipal?> ValidateAccessToken(string token, bool validateLifetime = true)
   {
     var validationParams = _twp.Clone();
     validationParams.ValidateLifetime = validateLifetime;
@@ -81,7 +84,18 @@ public class TokenService : ITokenService
       return null;
     }
 
-    return principal;
+    return await IsSecurityStampValid(principal) ? principal : null;
+  }
+
+  public async Task<bool> IsSecurityStampValid(ClaimsPrincipal principal)
+  {
+    var tokenStampHash = principal.FindFirstValue(SecurityStampClaimType);
+    if (tokenStampHash == null) return false;
+
+    var user = await _userManager.GetUserAsync(principal);
+    if (user?.SecurityStamp == null) return false;
+
+    return HashToken(user.SecurityStamp) == tokenStampHash;
   }
 
   // Only the hash is persisted; the raw token is handed to the client and never stored.
@@ -126,6 +140,9 @@ public class TokenService : ITokenService
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
         .SetProperty(rt => rt.RevokedByIp, ipAddress));
+
+    var user = await _userManager.FindByIdAsync(userId.ToString());
+    if (user != null) await _userManager.UpdateSecurityStampAsync(user);
   }
 
   public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)

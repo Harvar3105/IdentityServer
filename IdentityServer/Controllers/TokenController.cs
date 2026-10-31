@@ -61,11 +61,11 @@ public class TokenController : ControllerBase
   }
 
   [HttpPost("validate")]
-  public IActionResult ValidateToken([FromBody] string token)
+  public async Task<IActionResult> ValidateToken([FromBody] string token)
   {
     try
     {
-      var principal = _tokenService.ValidateAccessToken(token);
+      var principal = await _tokenService.ValidateAccessToken(token);
       if (principal == null)
       {
         return BadRequest(new { valid = false, error = "Invalid token" });

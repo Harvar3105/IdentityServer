@@ -174,8 +174,8 @@ dimensions are validated. Oversized uploads are rejected while reading: 413 from
 
 ## Token Model
 
-- **Access token**: JWT with `sub` (user id), `jti`, `ClaimTypes.Name` and one
-  `ClaimTypes.Role` per role. Validated with the singleton `TokenValidationParameters`
+- **Access token**: JWT with `sub` (user id), `jti`, `ClaimTypes.Name`, `sstamp` (SHA-256 of
+  the user's security stamp) and one `ClaimTypes.Role` per role. Validated with the singleton `TokenValidationParameters`
   registered in `Program.cs` (1 minute clock skew). JWT Bearer is the default authentication
   scheme (overriding the cookie defaults set by `AddIdentity`).
 - **Refresh token**: 64 random bytes. The client receives the raw value; only its SHA-256 hash
@@ -183,7 +183,11 @@ dimensions are validated. Oversized uploads are rejected while reading: 413 from
 - **Rotation**: the old token is revoked by a conditional `UPDATE` inside a transaction, so of
   several concurrent requests with the same token only one succeeds.
 - **Reuse detection**: presenting an already revoked token revokes all active refresh tokens
-  of its user.
+  of its user and changes their security stamp.
+- **Security stamp**: every access token check (JWT Bearer `OnTokenValidated` and
+  `/api/token/validate`) compares `sstamp` with the user's current stamp. Role changes and
+  reuse detection change the stamp, so access tokens issued before them are rejected at once
+  (costs one user lookup per authenticated request).
 
 ## Request Pipeline (Program.cs order)
 
@@ -209,7 +213,6 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Internal exception messages are returned to the client (`AuthController`, `TokenController`).
 - `User.LastLogin` is never updated on login.
-- `SecurityStamp` is not checked, so role changes do not affect already issued access tokens.
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).
 - Refresh tokens have no `FamilyId`, so reuse detection revokes every session of the user.

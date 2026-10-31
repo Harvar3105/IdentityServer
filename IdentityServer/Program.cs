@@ -118,7 +118,19 @@ builder.Services.AddAuthentication(options =>
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
   })
-    .AddJwtBearer(options => { options.TokenValidationParameters = twp; });
+    .AddJwtBearer(options =>
+    {
+      options.TokenValidationParameters = twp;
+      options.Events = new JwtBearerEvents
+      {
+        OnTokenValidated = async context =>
+        {
+          var tokenService = context.HttpContext.RequestServices.GetRequiredService<ITokenService>();
+          if (!await tokenService.IsSecurityStampValid(context.Principal!))
+            context.Fail("Token was issued before the user's security stamp changed.");
+        }
+      };
+    });
 builder.Services.AddAuthorization();
 
 // An empty or missing list blocks all cross-origin browser requests; server-to-server calls are unaffected.
@@ -259,6 +271,11 @@ static void SetupAppData(WebApplication app)
     {
       var removeResult = userManager.RemoveFromRolesAsync(user, extraRoles).Result;
       if (!removeResult.Succeeded) Console.WriteLine($"Seed user {seedUser.Email} roles not removed: {removeResult}");
+    }
+
+    if (missingRoles.Count > 0 || extraRoles.Count > 0)
+    {
+      userManager.UpdateSecurityStampAsync(user).Wait();
     }
   }
 }

@@ -34,6 +34,8 @@ public class ManageController : ControllerBase
     var success = await _userManager.AddToRoleAsync(user, request.Role);
     if (!success.Succeeded) return BadRequest($"Cannot assign {request.Role} to user!");
 
+    await _userManager.UpdateSecurityStampAsync(user);
+
     return Ok("Assigned");
   }
 
@@ -50,6 +52,8 @@ public class ManageController : ControllerBase
 
     var success = await _userManager.RemoveFromRoleAsync(user, request.Role);
     if (!success.Succeeded) return BadRequest($"Cannot remove {request.Role} from user!");
+
+    await _userManager.UpdateSecurityStampAsync(user);
 
     return Ok("Removed");
   }
