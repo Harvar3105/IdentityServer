@@ -34,10 +34,11 @@ Desktop.ini
 # JetBrains Rider specific
 .idea/
 
-# Docker secrets: only the templates are committed
+# Instance configuration and secrets: only the templates are committed
 .env
-instances/*.env
+instances/*
 !instances/example.env
+!instances/*Example.json
 
 # NPM packages (if using Node.js or front-end build tools)
 node_modules/

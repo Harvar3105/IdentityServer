@@ -12,185 +12,134 @@ each with its own database and configuration.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) — for local runs and tests
 - [Docker](https://docs.docker.com/get-docker/) with Docker Compose — for SQL Server and deployment
 
-## Files that are not in the repository
+## Configuration files
 
-Configuration files contain secrets and are git-ignored. Create them before the first run:
+All configuration of an instance lives in [instances/](instances/). Only the templates are committed;
+the real files are git-ignored.
 
-| File                                          | Needed for         | Template                                     |
-|-----------------------------------------------|--------------------|----------------------------------------------|
-| `IdentityServer/appsettings.Development.json` | local run          | [below](#appsettingsdevelopmentjson)         |
-| `IdentityServer/appsettings.json`             | Docker image       | [below](#appsettingsjson)                    |
-| `IdentityServer/Seed/roles.json`              | local run          | [instances/example.roles.json](instances/example.roles.json) |
-| `IdentityServer/Seed/users.json`              | local run, optional | [below](#seedusersjson)                     |
-| `.env`                                        | shared SQL Server  | [.env.example](.env.example)                 |
-| `instances/<project>.env`                     | Docker instance    | [instances/example.env](instances/example.env) |
-| instance application settings                 | Docker instance    | [instances/applicationExample.json](instances/applicationExample.json) |
+| Real file (git-ignored)                  | Template                                                   | Purpose                                                    |
+|------------------------------------------|------------------------------------------------------------|------------------------------------------------------------|
+| `instances/.env`                         | [example.env](instances/example.env)                       | Docker Compose: port, environment, SQL Server mode and logins |
+| `instances/appsettings.json`             | [appsettingsExample.json](instances/appsettingsExample.json) | Application settings in Production                       |
+| `instances/appsettings.Development.json` | [appsettingsExample.json](instances/appsettingsExample.json) | Application settings in Development                      |
+| `instances/roles.json`                   | [rolesExample.json](instances/rolesExample.json)           | Roles of the instance, every environment                   |
+| `instances/users.json`                   | [usersExample.json](instances/usersExample.json)           | Seed users, Development only (optional)                    |
+
+How the files reach the application:
+
+- **Local run** (`dotnet run`): the build copies `instances/*.json` to `config/` next to the binaries.
+  Restart the server after editing them.
+- **Docker**: `docker-compose.yml` mounts `instances/` into the container as `/app/config`, so the image
+  contains no configuration. Restart the container after editing them.
 
 The application stops at startup with an explicit error if a required key is missing.
 
-### `appsettings.Development.json`
+### Values to change
 
-Loaded when `ASPNETCORE_ENVIRONMENT=Development` (the default for `dotnet run`).
-The password in the connection string must match `MSSQL_SA_PASSWORD` from `.env`.
+- `instances/.env`
+  - `AUTH_PORT` — host port of the server.
+  - `MSSQL_SA_PASSWORD` — SQL Server administrator password; only used to create `DB_USER`.
+  - `DB_USER` / `DB_PASSWORD` — the login the application connects with. It is created (or its password
+    updated) on every `docker compose up` and gets the `dbcreator` role, so it creates and owns its
+    database on the first start. Must match `User Id` and `Password` in the connection strings of
+    `appsettings*.json`, and must not contain `'`.
+  - `COMPOSE_PROFILES`, `DB_PORT`, `DB_EDITION` — mode, host port and edition of the SQL Server, see
+    [SQL Server modes](#sql-server-modes).
+- `instances/appsettings*.json`
+  - `ConnectionStrings:DefaultConnection` — the host is `sqlserver` when the server runs in Docker
+    and `localhost,<DB_PORT>` when it runs with `dotnet run`.
+  - `Security:JWTSecret` — a unique random value of at least 32 bytes, e.g. `openssl rand -base64 48`.
+  - `Security:JWTIssuer` / `Security:JWTAudience` — the values the client project validates.
+  - `Security:AllowedOrigins` — browser origins of the client project.
+- `instances/roles.json` and `instances/users.json` — every seed user role must be listed in
+  `Roles:Available`, and seed passwords must satisfy `Security:Password`.
 
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
-    }
-  },
-  "ConnectionStrings": {
-    "DefaultConnection": "Server=localhost,1433;Database=IdentityServerDB;User Id=sa;Password=CHANGE_ME_Strong!Passw0rd;TrustServerCertificate=true;"
-  },
-  "Security": {
-    "JWTSecret": "CHANGE_ME_at_least_32_random_characters",
-    "JWTIssuer": "identity-dev",
-    "JWTAudience": "dev",
-    "JWTExpiration": 15,
-    "RTExpiration": 7,
-    "CredentialRateLimitPermits": 10,
-    "CredentialRateLimitWindowSeconds": 60,
-    "LockoutMaxFailedAttempts": 5,
-    "LockoutDurationMinutes": 15,
-    "LockoutAllowedForNewUsers": true,
-    "Password": {
-      "RequiredLength": 8,
-      "RequiredUniqueChars": 0,
-      "RequireDigit": true,
-      "RequireLowercase": true,
-      "RequireUppercase": true,
-      "RequireNonAlphanumeric": false
-    },
-    "AllowedOrigins": [ "http://localhost:3000" ]
-  },
-  "ProfilePicture": {
-    "MaxSizeBytes": 2097152,
-    "MinWidth": 64,
-    "MinHeight": 64,
-    "MaxWidth": 2048,
-    "MaxHeight": 2048,
-    "AllowedContentTypes": [ "image/jpeg", "image/png", "image/webp" ]
-  },
-  "AllowedHosts": "*"
-}
-```
-
-`JWTSecret` must be at least 32 bytes. Generate one with `openssl rand -base64 48`.
-
-### `appsettings.json`
-
-Loaded in every non-Development environment. The `Dockerfile` copies it into the image, so the image
-cannot start without it, and **it must not contain secrets**: keep only the shared defaults here and
-pass the connection string, `JWTSecret`, issuer, audience and CORS origins through
-`instances/<project>.env`.
-
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
-    }
-  },
-  "Security": {
-    "JWTExpiration": 15,
-    "RTExpiration": 7,
-    "CredentialRateLimitPermits": 10,
-    "CredentialRateLimitWindowSeconds": 60,
-    "LockoutMaxFailedAttempts": 5,
-    "LockoutDurationMinutes": 15,
-    "LockoutAllowedForNewUsers": true,
-    "Password": {
-      "RequiredLength": 8,
-      "RequiredUniqueChars": 0,
-      "RequireDigit": true,
-      "RequireLowercase": true,
-      "RequireUppercase": true,
-      "RequireNonAlphanumeric": false
-    }
-  },
-  "ProfilePicture": {
-    "MaxSizeBytes": 2097152,
-    "MinWidth": 64,
-    "MinHeight": 64,
-    "MaxWidth": 2048,
-    "MaxHeight": 2048,
-    "AllowedContentTypes": [ "image/jpeg", "image/png", "image/webp" ]
-  },
-  "AllowedHosts": "*"
-}
-```
-
-Any key can be overridden by an environment variable with `__` between sections,
+Any key can also be overridden by an environment variable with `__` between sections,
 e.g. `Security__JWTExpiration=30`.
 
-### `Seed/roles.json`
+## Quick start
 
-Defines the roles of the instance; all of them are created at startup. Copy the template:
+Run from the repository root (Bash or Git Bash).
+
+### 1. Create the configuration
 
 ```bash
-mkdir -p IdentityServer/Seed
-cp instances/example.roles.json IdentityServer/Seed/roles.json
+cp instances/example.env instances/.env
+cp instances/appsettingsExample.json instances/appsettings.json
+cp instances/appsettingsExample.json instances/appsettings.Development.json
+cp instances/rolesExample.json instances/roles.json
+cp instances/usersExample.json instances/users.json
 ```
 
-In Docker this file is not used: the instance mounts its own roles file (`ROLES_FILE` in
-`instances/<project>.env`) over `/app/Seed/roles.json`.
+Then edit the copies as described in [Values to change](#values-to-change).
+For a local run, set the host in `appsettings.Development.json` to `localhost,<DB_PORT>`.
 
-### `Seed/users.json`
+### 2a. Run in Docker
 
-Optional, loaded in Development only. Users are created at startup with exactly the listed roles;
-every role must be in `Roles:Available`, and passwords must satisfy `Security:Password`.
+The server and its SQL Server run in one compose stack named `identityserver`:
 
-```json
-{
-  "Seed": {
-    "Users": [
-      {
-        "Username": "admin",
-        "Email": "admin@example.com",
-        "Password": "CHANGE_ME_Admin1",
-        "Roles": [ "ADMIN" ]
-      },
-      {
-        "Username": "user",
-        "Email": "user@example.com",
-        "Password": "CHANGE_ME_User1",
-        "Roles": [ "USER" ]
-      }
-    ]
-  }
-}
+```bash
+docker network create shared-network 2>/dev/null || true
+docker compose --env-file instances/.env up -d --build
 ```
 
-## Running locally
+`shared-network` lets containers of client projects reach the server as `authserver:8080`; the
+database is only on the stack's own network.
 
-All commands are run from the repository root.
+The SQL Server starts first, then `sqlserver-init` creates `DB_USER`, then the server starts, applies
+migrations and creates the roles. The server listens on `http://localhost:<AUTH_PORT>`. With
+`ASPNETCORE_ENVIRONMENT=Development` in `instances/.env`, seed users are created and Swagger UI is
+available at `http://localhost:<AUTH_PORT>/swagger`.
 
-1. Start SQL Server in Docker (skip if you use your own SQL Server and adjust the connection string):
+Useful commands:
 
-   ```bash
-   docker network create shared-network
-   cp .env.example .env          # set MSSQL_SA_PASSWORD
-   docker compose -f docker-compose.db.yml up -d
-   ```
+```bash
+docker compose --env-file instances/.env logs -f authserver   # server logs
+docker compose --env-file instances/.env restart authserver   # apply configuration changes
+docker compose --env-file instances/.env down                 # stop the stack (data is kept in persistent mode)
+```
 
-2. Create `appsettings.Development.json`, `Seed/roles.json` and, optionally, `Seed/users.json`
-   as described above.
+#### SQL Server modes
 
-3. Run the server:
+`COMPOSE_PROFILES` in `instances/.env` selects how the stack runs the SQL Server:
 
-   ```bash
-   dotnet run --project IdentityServer --launch-profile http
-   ```
+| Mode         | Data                                                         | Restart              |
+|--------------|--------------------------------------------------------------|----------------------|
+| `persistent` | kept in the `identityserver_sqlserver_data` volume           | with Docker          |
+| `test`       | inside the container; `down` deletes all databases           | no                   |
+| empty        | no SQL Server in the stack; connection strings point to an external one | —     |
 
-   Migrations are applied and roles/seed users are created automatically at startup.
-   Use `--launch-profile https` to also listen on `https://localhost:7066`.
+In both modes the database is reachable as `sqlserver`, so connection strings do not change. Stop the
+stack before switching modes:
 
-4. Open Swagger UI at <http://localhost:5078/swagger>.
+```bash
+docker compose --env-file instances/.env down
+# change COMPOSE_PROFILES in instances/.env
+docker compose --env-file instances/.env up -d
+```
 
-Check that the server works by registering a user:
+A database created earlier by another login (e.g. `sa`) is not accessible to `DB_USER`; drop it or
+grant access to it manually.
+
+`MSSQL_SA_PASSWORD` only takes effect when the `identityserver_sqlserver_data` volume is created. If
+`sqlserver-init` fails with `Login failed for user 'sa'`, the volume was created with another password:
+put that password into `instances/.env`, or remove the volume (`docker volume rm identityserver_sqlserver_data`,
+deletes all databases) so that it is created again.
+
+### 2b. Or run locally
+
+Start only the SQL Server from the stack, then the server with `dotnet run`:
+
+```bash
+docker network create shared-network 2>/dev/null || true
+docker compose --env-file instances/.env up -d sqlserver sqlserver-init      # sqlserver-test in test mode
+dotnet run --project IdentityServer --launch-profile http
+```
+
+Swagger UI: <http://localhost:5078/swagger>. Use `--launch-profile https` to also listen on
+`https://localhost:7066`.
+
+### 3. Check that it works
 
 ```bash
 curl -X POST http://localhost:5078/api/auth/register \
@@ -198,64 +147,4 @@ curl -X POST http://localhost:5078/api/auth/register \
   -d '{"username":"test","email":"test@example.com","password":"Passw0rd1"}'
 ```
 
-## Running in Docker
-
-Every client project gets its own container, database and env file; all instances share one
-SQL Server per host.
-
-1. Once per host, start the shared SQL Server:
-
-   ```bash
-   docker network create shared-network
-   cp .env.example .env          # set MSSQL_SA_PASSWORD
-   docker compose -f docker-compose.db.yml up -d
-   ```
-
-2. Create `IdentityServer/appsettings.json` as described above (it is baked into the image).
-
-3. For each client project, create its env file and roles file:
-
-   ```bash
-   cp instances/example.env instances/<project>.env
-   cp instances/example.roles.json instances/<project>.roles.json
-   ```
-
-   In `instances/<project>.env` set at least:
-
-   | Variable                                | Value                                                        |
-   |-----------------------------------------|--------------------------------------------------------------|
-   | `COMPOSE_PROJECT_NAME`                  | unique per instance, e.g. `<project>-auth`                   |
-   | `INSTANCE_ENV_FILE`                     | `instances/<project>.env`                                    |
-   | `ROLES_FILE`                            | `./instances/<project>.roles.json`                           |
-   | `AUTH_PORT`                             | free host port, unique per instance                          |
-
-   A literal `$` in a value must be written as `$$`.
-
-   Instance application settings are templated in
-   [instances/applicationExample.json](instances/applicationExample.json):
-
-   | Key                                     | Value                                                        |
-   |-----------------------------------------|--------------------------------------------------------------|
-   | `ConnectionStrings:DefaultConnection`   | `Server=sqlserver,1433;...` with a unique `Database` name and the password from `.env` |
-   | `Security:JWTSecret`                    | unique random value, at least 32 characters                  |
-   | `Security:JWTIssuer` / `Security:JWTAudience` | issuer / audience the client project validates         |
-   | `Security:AllowedOrigins`               | browser origins of the client project                        |
-
-   > **Not wired yet:** `docker-compose.yml` does not pass this JSON file to the container. Until it does,
-   > set these keys as environment variables in `instances/<project>.env` (`__` between sections, e.g.
-   > `Security__JWTSecret=...`, `Security__AllowedOrigins__0=https://...`).
-
-4. Build and start the instance:
-
-   ```bash
-   docker compose --env-file instances/<project>.env up -d --build
-   ```
-
-   The server listens on `http://localhost:<AUTH_PORT>`. Swagger is not available outside Development.
-
-Useful commands:
-
-```bash
-docker compose --env-file instances/<project>.env logs -f      # logs
-docker compose --env-file instances/<project>.env down         # stop the instance
-```
+For Docker, replace `5078` with `AUTH_PORT`.
