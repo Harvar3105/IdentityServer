@@ -36,9 +36,11 @@ IdentityServer/                      # repository root
 ├── docker-compose.db.yml            # shared SQL Server, started once per host
 ├── docker-compose.yml               # one IdentityServer instance, parameterized by an env file
 ├── instances/
+│   ├── applicationExample.json      # template for instance application settings (not passed to the container yet)
 │   ├── example.env                  # template for instances/<project>.env (git-ignored copies)
 │   └── example.roles.json           # roles mounted into the container as Seed/roles.json
 ├── IdentityServer.sln
+├── README.md                        # required local files, local run and Docker deployment
 ├── TESTING.md                       # how to run tests and collect code coverage
 ├── IdentityServer.Tests/            # xUnit tests (`dotnet test`), not part of the Docker image
 │   └── Unit/                        # unit tests; folders mirror the Web API project
