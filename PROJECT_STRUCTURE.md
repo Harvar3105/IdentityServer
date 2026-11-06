@@ -21,30 +21,42 @@ only; the code is never copied per project.
 | Persistence      | Entity Framework Core 9 + SQL Server                         |
 | Protection       | Account lockout, per-IP rate limiting on `/api/auth/*`       |
 | API docs         | Swagger + OpenAPI (Development only)                         |
-| Containerization | Dockerfile (multi-stage), docker-compose per instance + shared SQL Server |
+| Containerization | Dockerfile (multi-stage), one compose stack: server + SQL Server |
+| Tests            | xUnit + EF Core SQLite in-memory                             |
 
 ## Directory Layout
 
 ```text
 IdentityServer/                      # repository root
 ├── .editorconfig                    # LF, UTF-8, 2-space indent for C#
-├── .gitignore                       # ignores appsettings*.json, Seed/, .env, instances/*.env
-├── .dockerignore                    # keeps bin/obj, .env and instances/ out of the image
-├── .env.example                     # template for .env (SQL Server SA password)
+├── .gitignore                       # ignores everything in instances/ except the templates
+├── .dockerignore                    # keeps bin/obj, instances/ and appsettings*.json out of the image
 ├── Dockerfile                       # SDK build stage -> aspnet runtime stage
-├── docker-compose.db.yml            # shared SQL Server, started once per host
-├── docker-compose.yml               # one IdentityServer instance, parameterized by an env file
-├── instances/
-│   ├── example.env                  # template for instances/<project>.env (git-ignored copies)
-│   └── example.roles.json           # roles mounted into the container as Seed/roles.json
+├── docker/
+│   └── sqlserver/
+│       └── create-login.sql         # creates the application login DB_USER with the dbcreator role
+├── docker-compose.yml               # stack "identityserver": server (mounts instances/ as /app/config) + SQL Server
+├── instances/                       # instance configuration; real files are git-ignored
+│   ├── example.env                  # template for .env: compose project name, port, environment, SA password
+│   ├── appsettingsExample.json      # template for appsettings.json / appsettings.Development.json
+│   ├── rolesExample.json            # template for roles.json: "Roles" section, every environment
+│   └── usersExample.json            # template for users.json: seed users, Development only
 ├── IdentityServer.sln
-└── IdentityServer/                  # the single Web API project
-    ├── IdentityServer.csproj
+├── README.md                        # required local files, local run and Docker deployment
+├── TESTING.md                       # how to run tests and collect code coverage
+├── IdentityServer.Tests/            # xUnit tests (`dotnet test`), not part of the Docker image
+│   └── Unit/                        # unit tests; folders mirror the Web API project
+│       ├── Entities/
+│       │   └── RefreshTokenTests.cs # IsExpired / IsActive
+│       └── Services/
+│           ├── TokenServiceFixture.cs    # real TokenService + Identity on SQLite in-memory (ExecuteUpdate support)
+│           ├── TokenServiceAccessTokenTests.cs   # JWT claims, signature/issuer/audience/alg/lifetime checks, security stamp
+│           └── TokenServiceRefreshTokenTests.cs  # hashing, lookup, rotation, single-use revocation, reuse detection
+└── IdentityServer/                  # the Web API project
+    ├── IdentityServer.csproj        # copies instances/*.json (except templates) to config/ in the output
     ├── IdentityServer.http          # HTTP scratch requests (still the template stub)
     ├── Program.cs                   # configuration, DI, auth, CORS, pipeline, migration + seeding
     ├── ApplicationDbContext.cs      # IdentityDbContext + RefreshTokens DbSet
-    ├── appsettings.json             # git-ignored, production config
-    ├── appsettings.Development.json # git-ignored, development config
     ├── Properties/
     │   └── launchSettings.json      # http :5078, https :7066
     ├── Controllers/
@@ -86,19 +98,18 @@ IdentityServer/                      # repository root
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
-    ├── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation)
-    └── Seed/                        # git-ignored
-        ├── roles.json               # "Roles" section, loaded in every environment
-        └── users.json               # seed users with their roles, loaded in Development only
+    └── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation)
 ```
 
 ## Configuration
 
-Sources in load order (later ones override earlier ones):
+Files are read from `config/` next to the binaries: a local build copies `instances/*.json` there,
+and `docker-compose.yml` mounts `instances/` there. Sources in load order (later ones override
+earlier ones):
 
 1. `appsettings.Development.json` (Development) or `appsettings.json` (other environments)
-2. `Seed/roles.json` (optional, every environment)
-3. `Seed/users.json` (optional, Development only)
+2. `roles.json` (optional, every environment)
+3. `users.json` (optional, Development only)
 4. Environment variables (`Section__Key`, e.g. `Security__JWTSecret`)
 
 Missing required keys stop the application at startup with an explicit error.
@@ -196,16 +207,19 @@ CORS → RateLimiter → Authentication → Authorization → MapControllers.
 
 ## Deployment
 
+Step-by-step instructions are in [README.md](README.md). In short, after creating the files in
+`instances/` from their templates:
+
 ```bash
-docker network create shared-network                     # once per host
-cp .env.example .env                                     # set MSSQL_SA_PASSWORD
-docker compose -f docker-compose.db.yml up -d            # shared SQL Server, once per host
-cp instances/example.env instances/<project>.env         # per project: port, DB, secrets, origins
-docker compose --env-file instances/<project>.env up -d --build
+docker network create shared-network 2>/dev/null || true                 # once per host
+docker compose --env-file instances/.env up -d --build                   # server + SQL Server
 ```
 
-Each instance needs its own `COMPOSE_PROJECT_NAME`, `AUTH_PORT`, database name, `JWTSecret`
-and roles file.
+`COMPOSE_PROFILES` in `instances/.env` selects the SQL Server mode: `persistent` (named volume,
+restarts with Docker), `test` (no volume, `down` deletes the databases) or empty (external SQL Server).
+
+The stack name is fixed, so a host runs one IdentityServer stack; a second one would need another
+project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 
 ## Known Issues
 
@@ -215,6 +229,6 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 - `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).
 - Refresh tokens have no `FamilyId`, so reuse detection revokes every session of the user.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
-- `appsettings.json` is git-ignored, so an image built from a fresh clone cannot start in Production.
-- All instances connect to SQL Server as `sa`; a dedicated login per instance is preferable.
+- The `dbcreator` role of `DB_USER` also allows creating databases of other names and dropping
+  databases the login owns.
 - No logout endpoint and no cleanup of expired/revoked refresh tokens yet.

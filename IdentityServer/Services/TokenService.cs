@@ -134,6 +134,8 @@ public class TokenService : ITokenService
 
   public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
   {
+    // FIXME: ExecuteUpdateAsync bypasses the change tracker: refresh tokens already tracked by this DbContext
+    // keep RevokedAt == null and still report IsActive == true for the rest of the request.
     var revokedAt = DateTime.UtcNow;
     await _dbContext.RefreshTokens
       .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
@@ -165,6 +167,8 @@ public class TokenService : ITokenService
   {
     // Conditional UPDATE executed in the database: of several concurrent requests holding the same
     // token only one sees RevokedAt == null, the others affect 0 rows and are rejected.
+    // FIXME: ExecuteUpdateAsync bypasses the change tracker: oldToken and any tracked copy keep RevokedAt == null,
+    // so a later lookup through the same DbContext (e.g. FindActiveRefreshToken) still sees the token as active.
     var revokedAt = DateTime.UtcNow;
     var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.Id == oldToken.Id && rt.RevokedAt == null)

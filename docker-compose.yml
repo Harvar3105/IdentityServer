@@ -1,6 +1,29 @@
-# One IdentityServer instance per client project; every instance has its own env file and database.
-#   docker compose --env-file instances/<project>.env up -d --build
-# Requires the shared SQL Server from docker-compose.db.yml.
+# IdentityServer stack: the server and its SQL Server, configured by the files in instances/ (see README.md).
+#   docker network create shared-network
+#   docker compose --env-file instances/.env up -d --build
+# COMPOSE_PROFILES selects the SQL Server mode: "persistent" or "test". Run "down" before switching modes.
+
+name: identityserver
+
+x-sqlserver: &sqlserver
+  image: mcr.microsoft.com/mssql/server:2022-latest
+  environment:
+    - ACCEPT_EULA=Y
+    - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is not set}
+    - MSSQL_PID=${DB_EDITION:-Express}
+  ports:
+    - "${DB_PORT:-1433}:1433"
+  # "Login failed" also means the server accepts connections: a wrong MSSQL_SA_PASSWORD (e.g. an existing volume
+  # created with another one) then fails sqlserver-init with a clear error instead of an endless unhealthy wait.
+  healthcheck:
+    test: [ "CMD-SHELL", "out=$$(/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" 2>&1) || echo \"$$out\" | grep -q 'Login failed'" ]
+    interval: 10s
+    retries: 10
+    start_period: 20s
+  networks:
+    default:
+      # Both modes are reachable as "sqlserver", so connection strings do not depend on the mode.
+      aliases: [ "sqlserver" ]
 
 services:
   authserver:
@@ -9,16 +32,61 @@ services:
       dockerfile: Dockerfile
     image: identityserver:latest
     restart: unless-stopped
-    env_file:
-      - ${INSTANCE_ENV_FILE:?INSTANCE_ENV_FILE is not set}
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
     volumes:
-      - ${ROLES_FILE:?ROLES_FILE is not set}:/app/Seed/roles.json:ro
+      - ./instances:/app/config:ro
     ports:
       - "${AUTH_PORT:?AUTH_PORT is not set}:8080"
+    depends_on:
+      sqlserver-init:
+        condition: service_completed_successfully
+        # Ignored when COMPOSE_PROFILES is empty and an external SQL Server is used.
+        required: false
     networks:
+      - default
       - shared-network
 
+  # Data is kept in a named volume and survives "down"; the container restarts with Docker.
+  sqlserver:
+    <<: *sqlserver
+    profiles: [ "persistent" ]
+    restart: unless-stopped
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+
+  # No volume: "down" deletes all databases, so every test run starts from an empty server.
+  sqlserver-test:
+    <<: *sqlserver
+    profiles: [ "test" ]
+    restart: "no"
+
+  # One-shot: creates the application login DB_USER (or updates its password) on every "up".
+  sqlserver-init:
+    profiles: [ "persistent", "test" ]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: "no"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+        required: false
+      sqlserver-test:
+        condition: service_healthy
+        required: false
+    environment:
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is not set}
+      - DB_USER=${DB_USER:?DB_USER is not set}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is not set}
+    volumes:
+      - ./docker/sqlserver/create-login.sql:/scripts/create-login.sql:ro
+    entrypoint: [ "/bin/sh", "-c", "/opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -i /scripts/create-login.sql" ]
+
+volumes:
+  # Resolves to identityserver_sqlserver_data, so databases of the former separate SQL Server stack are kept.
+  sqlserver_data:
+
 networks:
+  # Lets client project containers reach authserver; the database stays on the stack's own network.
   shared-network:
     name: shared-network
     external: true

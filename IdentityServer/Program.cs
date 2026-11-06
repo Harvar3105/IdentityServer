@@ -16,23 +16,24 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Instance configuration lives in instances/ at the repository root: the build copies it to config/ next to
+// the binaries, and docker-compose.yml mounts the folder there.
+builder.Configuration.SetBasePath(Path.Combine(AppContext.BaseDirectory, "config"));
 if (builder.Environment.IsDevelopment())
 {
-  builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.Development.json", optional: false, reloadOnChange: true);
+  builder.Configuration.AddJsonFile("appsettings.Development.json", optional: false, reloadOnChange: true);
 }
 else
 {
-  builder.Configuration.SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+  builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 }
 
 // Roles are required in every environment (registration assigns Roles:Initial), so the file may be replaced
 // by Roles__* environment variables; seeded users are development data only.
-builder.Configuration.AddJsonFile("Seed/roles.json", optional: true, reloadOnChange: false);
+builder.Configuration.AddJsonFile("roles.json", optional: true, reloadOnChange: false);
 if (builder.Environment.IsDevelopment())
 {
-  builder.Configuration.AddJsonFile("Seed/users.json", optional: true, reloadOnChange: false);
+  builder.Configuration.AddJsonFile("users.json", optional: true, reloadOnChange: false);
 }
 
 builder.Configuration.AddEnvironmentVariables();
