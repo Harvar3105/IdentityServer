@@ -157,7 +157,7 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
-  public async Task RevokeAllRefreshTokens_RevokesOnlyActiveTokensOfThatUser()
+  public async Task RevokeAllSessions_RevokesOnlyActiveTokensOfThatUser()
   {
     var user = await _fixture.CreateUserAsync("alice");
     var otherUser = await _fixture.CreateUserAsync("bob");
@@ -169,7 +169,7 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
     alreadyRevoked.RevokedByIp = "192.168.0.1";
     await _fixture.DbContext.SaveChangesAsync();
 
-    await _fixture.TokenService.RevokeAllRefreshTokens(user.Id, AttackerIp);
+    await _fixture.TokenService.RevokeAllSessions(user.Id, AttackerIp);
 
     var reloadedActive = await _fixture.ReloadRefreshTokenAsync(active.Id);
     Assert.NotNull(reloadedActive.RevokedAt);
@@ -183,23 +183,23 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
-  public async Task RevokeAllRefreshTokens_UpdatesSecurityStampOnlyOfThatUser()
+  public async Task RevokeAllSessions_UpdatesSecurityStampOnlyOfThatUser()
   {
     var user = await _fixture.CreateUserAsync("alice");
     var otherUser = await _fixture.CreateUserAsync("bob");
     var userStampBefore = await _fixture.UserManager.GetSecurityStampAsync(user);
     var otherUserStampBefore = await _fixture.UserManager.GetSecurityStampAsync(otherUser);
 
-    await _fixture.TokenService.RevokeAllRefreshTokens(user.Id, TokenServiceFixture.IpAddress);
+    await _fixture.TokenService.RevokeAllSessions(user.Id, TokenServiceFixture.IpAddress);
 
     Assert.NotEqual(userStampBefore, await _fixture.UserManager.GetSecurityStampAsync(user));
     Assert.Equal(otherUserStampBefore, await _fixture.UserManager.GetSecurityStampAsync(otherUser));
   }
 
   [Fact]
-  public async Task RevokeAllRefreshTokens_UnknownUser_DoesNotThrow()
+  public async Task RevokeAllSessions_UnknownUser_DoesNotThrow()
   {
-    await _fixture.TokenService.RevokeAllRefreshTokens(Guid.NewGuid(), TokenServiceFixture.IpAddress);
+    await _fixture.TokenService.RevokeAllSessions(Guid.NewGuid(), TokenServiceFixture.IpAddress);
   }
 
   [Fact]

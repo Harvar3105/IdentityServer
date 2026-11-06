@@ -135,27 +135,29 @@ public class TokenService : ITokenService
       if (refreshToken.ReplacedByTokenHash == null) return null;
 
       _logger.LogWarning("💥Revoked refresh token reused for user {UserId}; revoking all active refresh tokens", refreshToken.UserId);
-      await RevokeAllRefreshTokens(refreshToken.UserId, ipAddress);
+      await RevokeAllSessions(refreshToken.UserId, ipAddress);
       return null;
     }
 
     return refreshToken.IsActive ? refreshToken : null;
   }
 
-  public async Task<bool> RevokeRefreshToken(string rawRefreshToken, Guid userId, string ipAddress)
+  public async Task<bool> RevokeSession(string rawRefreshToken, Guid userId, string ipAddress)
   {
     var tokenHash = HashToken(rawRefreshToken);
     var revokedAt = DateTime.UtcNow;
     var affectedRows = await _dbContext.RefreshTokens
-      .Where(rt => rt.TokenHash == tokenHash && rt.UserId == userId && rt.RevokedAt == null)
+      .Where(rt => rt.UserId == userId && rt.RevokedAt == null &&
+        _dbContext.RefreshTokens.Any(presented =>
+          presented.TokenHash == tokenHash && presented.UserId == userId && presented.FamilyId == rt.FamilyId))
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
         .SetProperty(rt => rt.RevokedByIp, ipAddress));
 
-    return affectedRows == 1;
+    return affectedRows > 0;
   }
 
-  public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
+  public async Task RevokeAllSessions(Guid userId, string ipAddress)
   {
     // FIXME: ExecuteUpdateAsync bypasses the change tracker: refresh tokens already tracked by this DbContext
     // keep RevokedAt == null and still report IsActive == true for the rest of the request.
