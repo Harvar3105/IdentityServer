@@ -103,8 +103,8 @@ public class TokenService : ITokenService
   }
 
   // Only the hash is persisted; the raw token is handed to the client and never stored.
-  // Without familyId the token starts a new session; rotation passes the family of the token it replaces.
-  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user, Guid? familyId = null)
+  // Without sessionId the token starts a new session; rotation passes the session of the token it replaces.
+  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user, Guid? sessionId = null)
   {
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
@@ -112,7 +112,7 @@ public class TokenService : ITokenService
     var entity = new RefreshToken
     {
       UserId = user.Id,
-      FamilyId = familyId ?? Guid.NewGuid(),
+      SessionId = sessionId ?? Guid.NewGuid(),
       TokenHash = hash,
       CreatedAt = DateTime.UtcNow,
       CreatedByIp = ipAddress,
@@ -149,7 +149,7 @@ public class TokenService : ITokenService
     var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.UserId == userId && rt.RevokedAt == null &&
         _dbContext.RefreshTokens.Any(presented =>
-          presented.TokenHash == tokenHash && presented.UserId == userId && presented.FamilyId == rt.FamilyId))
+          presented.TokenHash == tokenHash && presented.UserId == userId && presented.SessionId == rt.SessionId))
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
         .SetProperty(rt => rt.RevokedByIp, ipAddress));
@@ -174,7 +174,7 @@ public class TokenService : ITokenService
 
   public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
-    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user, oldToken.FamilyId);
+    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user, oldToken.SessionId);
 
     await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 

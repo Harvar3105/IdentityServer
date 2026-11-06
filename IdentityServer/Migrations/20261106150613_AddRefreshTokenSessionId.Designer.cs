@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IdentityServer.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20261106144455_AddRefreshTokenFamilyId")]
-    partial class AddRefreshTokenFamilyId
+    [Migration("20261106150613_AddRefreshTokenSessionId")]
+    partial class AddRefreshTokenSessionId
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -76,9 +76,6 @@ namespace IdentityServer.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid>("FamilyId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("ReplacedByTokenHash")
                         .HasColumnType("nvarchar(max)");
 
@@ -87,6 +84,9 @@ namespace IdentityServer.Migrations
 
                     b.Property<string>("RevokedByIp")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()
@@ -97,7 +97,7 @@ namespace IdentityServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FamilyId");
+                    b.HasIndex("SessionId");
 
                     b.HasIndex("UserId");
 

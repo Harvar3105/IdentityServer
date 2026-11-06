@@ -27,7 +27,7 @@ public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClai
       .OnDelete(DeleteBehavior.Cascade);
 
     builder.Entity<RefreshToken>()
-      .HasIndex(rt => rt.FamilyId);
+      .HasIndex(rt => rt.SessionId);
 
     builder.Entity<User>()
       .HasMany(u => u.Claims)

@@ -73,9 +73,6 @@ namespace IdentityServer.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid>("FamilyId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("ReplacedByTokenHash")
                         .HasColumnType("nvarchar(max)");
 
@@ -84,6 +81,9 @@ namespace IdentityServer.Migrations
 
                     b.Property<string>("RevokedByIp")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()
@@ -94,7 +94,7 @@ namespace IdentityServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("FamilyId");
+                    b.HasIndex("SessionId");
 
                     b.HasIndex("UserId");
 

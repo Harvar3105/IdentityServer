@@ -6,7 +6,7 @@ namespace IdentityServer.Domain.Services;
 public interface ITokenService
 {
   Task<string> GenerateAccessToken(User user);
-  (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user, Guid? familyId = null);
+  (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user, Guid? sessionId = null);
   Task<ClaimsPrincipal?> ValidateAccessToken(string token, bool validateLifetime = true);
   Task<bool> IsSecurityStampValid(ClaimsPrincipal principal);
   Task<RefreshToken?> FindActiveRefreshToken(string rawToken, string ipAddress);
