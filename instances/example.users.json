@@ -1,0 +1,18 @@
+{
+  "Seed": {
+    "Users": [
+      {
+        "Username": "admin",
+        "Email": "admin@email.ee",
+        "Password": "adminPassword123",
+        "Roles": [ "ADMIN" ]
+      },
+      {
+        "Username": "user",
+        "Email": "user@email.ee",
+        "Password": "userPassword123",
+        "Roles": [ "USER" ]
+      }
+    ]
+  }
+}
