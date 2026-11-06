@@ -232,3 +232,5 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 - The `dbcreator` role of `DB_USER` also allows creating databases of other names and dropping
   databases the login owns.
 - No logout endpoint and no cleanup of expired/revoked refresh tokens yet.
+- Access tokens are signed with a shared HMAC secret, so any resource server that validates them
+  locally can also issue them; RS256/ES256 with a JWKS endpoint is planned.

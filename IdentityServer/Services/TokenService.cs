@@ -10,6 +10,8 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Services;
 
+// TODO: Periodically delete expired and revoked refresh tokens (e.g. a hosted background service), keeping revoked
+// ones for a retention period long enough for reuse detection to still recognize them.
 public class TokenService : ITokenService
 {
   private const string SecurityStampClaimType = "sstamp";
@@ -44,6 +46,8 @@ public class TokenService : ITokenService
     var roles = await _userManager.GetRolesAsync(user);
     claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
+    // TODO: Switch from HMAC-SHA256 to RS256/ES256 and publish the public key via a JWKS endpoint: with a shared
+    // symmetric secret every resource server that validates tokens locally can also issue them.
     var key = _twp.IssuerSigningKey;
     var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
