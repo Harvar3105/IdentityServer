@@ -10,6 +10,7 @@ public interface ITokenService
   Task<ClaimsPrincipal?> ValidateAccessToken(string token, bool validateLifetime = true);
   Task<bool> IsSecurityStampValid(ClaimsPrincipal principal);
   Task<RefreshToken?> FindActiveRefreshToken(string rawToken, string ipAddress);
+  Task<bool> RevokeRefreshToken(string rawRefreshToken, Guid userId, string ipAddress);
   Task RevokeAllRefreshTokens(Guid userId, string ipAddress);
   Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress);
   Task<bool> TryRevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress);

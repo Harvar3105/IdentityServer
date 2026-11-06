@@ -128,12 +128,29 @@ public class TokenService : ITokenService
 
     if (refreshToken.RevokedAt != null)
     {
+      // Only a rotated token (it has a successor) signals theft. A token revoked by logout or by revoking all
+      // sessions has no successor and is simply rejected, so a late request from a logged-out client is harmless.
+      if (refreshToken.ReplacedByTokenHash == null) return null;
+
       _logger.LogWarning("💥Revoked refresh token reused for user {UserId}; revoking all active refresh tokens", refreshToken.UserId);
       await RevokeAllRefreshTokens(refreshToken.UserId, ipAddress);
       return null;
     }
 
     return refreshToken.IsActive ? refreshToken : null;
+  }
+
+  public async Task<bool> RevokeRefreshToken(string rawRefreshToken, Guid userId, string ipAddress)
+  {
+    var tokenHash = HashToken(rawRefreshToken);
+    var revokedAt = DateTime.UtcNow;
+    var affectedRows = await _dbContext.RefreshTokens
+      .Where(rt => rt.TokenHash == tokenHash && rt.UserId == userId && rt.RevokedAt == null)
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, revokedAt)
+        .SetProperty(rt => rt.RevokedByIp, ipAddress));
+
+    return affectedRows == 1;
   }
 
   public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
