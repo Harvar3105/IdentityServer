@@ -34,12 +34,13 @@ Desktop.ini
 # JetBrains Rider specific
 .idea/
 
-# Docker secrets: only the templates are committed
+# Instance configuration and secrets: only the templates are committed
 .env
-instances/*.env
+instances/*
 !instances/example.env
 instances/roles.json
 instances/users.json
+!instances/*Example.json
 
 # NPM packages (if using Node.js or front-end build tools)
 node_modules/
@@ -52,6 +53,9 @@ node_modules/
 
 # Ignore the publish output of .NET Core projects
 publish/
+
+# Test results and coverage reports (see TESTING.md)
+TestResults/
 
 # Ignore temporary files and logs
 *.log

@@ -20,4 +20,10 @@
         <PackageReference Include="Swashbuckle.AspNetCore" Version="8.1.1" />
     </ItemGroup>
 
+    <!-- Local runs read the git-ignored instance configuration from config/; Docker mounts instances/ there instead. -->
+    <ItemGroup>
+        <None Include="..\instances\*.json" Exclude="..\instances\*Example.json"
+              Link="config\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
 </Project>
