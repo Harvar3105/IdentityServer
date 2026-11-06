@@ -170,7 +170,7 @@ public class AuthController : ControllerBase
 }
 
 // TODO: Split the shared DataModel into dedicated request contracts per endpoint (register, login, refresh)
-// in Domain/Dtos, so that each endpoint accepts only its own fields. Changes the public JSON contract.
+// in Controllers/Contracts, so that each endpoint accepts only its own fields. Changes the public JSON contract.
 public class DataModel
 {
   public Guid? Id { get; set; }

@@ -5,6 +5,8 @@ namespace IdentityServer.Entities;
 public class RefreshToken
 {
   public Guid Id { get; set; }
+  // FIXME: TokenHash is nvarchar(max) without an index, so every refresh-token lookup scans the whole table.
+  // Needs a bounded length (a Base64 SHA-256 hash is 44 chars) and a unique index; requires a migration.
   public string TokenHash { get; set; } = null!;
   public DateTime ExpiresAt { get; set; }
   public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
