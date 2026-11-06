@@ -157,12 +157,12 @@ public class TokenService : ITokenService
     return affectedRows > 0;
   }
 
-  public async Task RevokeAllSessions(Guid userId, string ipAddress)
+  public async Task<bool> RevokeAllSessions(Guid userId, string ipAddress)
   {
     // FIXME: ExecuteUpdateAsync bypasses the change tracker: refresh tokens already tracked by this DbContext
     // keep RevokedAt == null and still report IsActive == true for the rest of the request.
     var revokedAt = DateTime.UtcNow;
-    await _dbContext.RefreshTokens
+    var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
@@ -170,6 +170,8 @@ public class TokenService : ITokenService
 
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user != null) await _userManager.UpdateSecurityStampAsync(user);
+
+    return affectedRows > 0;
   }
 
   public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)

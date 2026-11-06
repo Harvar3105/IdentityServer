@@ -71,6 +71,29 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
+  public async Task GenerateRefreshToken_WithoutSessionId_StartsNewSession()
+  {
+    var user = await _fixture.CreateUserAsync();
+
+    var (first, _) = _fixture.TokenService.GenerateRefreshToken(TokenServiceFixture.IpAddress, user);
+    var (second, _) = _fixture.TokenService.GenerateRefreshToken(TokenServiceFixture.IpAddress, user);
+
+    Assert.NotEqual(Guid.Empty, first.SessionId);
+    Assert.NotEqual(first.SessionId, second.SessionId);
+  }
+
+  [Fact]
+  public async Task GenerateRefreshToken_WithSessionId_JoinsThatSession()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var sessionId = Guid.NewGuid();
+
+    var (entity, _) = _fixture.TokenService.GenerateRefreshToken(TokenServiceFixture.IpAddress, user, sessionId);
+
+    Assert.Equal(sessionId, entity.SessionId);
+  }
+
+  [Fact]
   public async Task FindActiveRefreshToken_ActiveToken_ReturnsEntity()
   {
     var user = await _fixture.CreateUserAsync();
@@ -157,6 +180,95 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
+  public async Task FindActiveRefreshToken_TokenOfRevokedSession_ReturnsNullWithoutRevokingOtherSessions()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (_, loggedOutRawToken) = await _fixture.AddRefreshTokenAsync(user);
+    var (otherSession, _) = await _fixture.AddRefreshTokenAsync(user);
+    Assert.True(await _fixture.TokenService.RevokeSession(loggedOutRawToken, user.Id, TokenServiceFixture.IpAddress));
+    var stampBefore = await _fixture.GetPersistedSecurityStampAsync(user.Id);
+    _fixture.StartNewRequest();
+
+    Assert.Null(await _fixture.TokenService.FindActiveRefreshToken(loggedOutRawToken, TokenServiceFixture.IpAddress));
+
+    Assert.Null((await _fixture.ReloadRefreshTokenAsync(otherSession.Id)).RevokedAt);
+    Assert.Equal(stampBefore, await _fixture.GetPersistedSecurityStampAsync(user.Id));
+  }
+
+  [Fact]
+  public async Task RevokeSession_ActiveToken_RevokesOnlyThatSessionAndKeepsSecurityStamp()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (loggedOut, loggedOutRawToken) = await _fixture.AddRefreshTokenAsync(user);
+    var (otherSession, _) = await _fixture.AddRefreshTokenAsync(user);
+    var stampBefore = await _fixture.GetPersistedSecurityStampAsync(user.Id);
+
+    Assert.True(await _fixture.TokenService.RevokeSession(loggedOutRawToken, user.Id, AttackerIp));
+
+    var reloadedLoggedOut = await _fixture.ReloadRefreshTokenAsync(loggedOut.Id);
+    Assert.NotNull(reloadedLoggedOut.RevokedAt);
+    Assert.Equal(AttackerIp, reloadedLoggedOut.RevokedByIp);
+    Assert.Null(reloadedLoggedOut.ReplacedByTokenHash);
+    Assert.Null((await _fixture.ReloadRefreshTokenAsync(otherSession.Id)).RevokedAt);
+    Assert.Equal(stampBefore, await _fixture.GetPersistedSecurityStampAsync(user.Id));
+  }
+
+  [Fact]
+  public async Task RevokeSession_RotatedToken_RevokesActiveSuccessor()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (rotatedToken, rotatedRawToken) = await _fixture.AddRefreshTokenAsync(user);
+    var rotation = await _fixture.TokenService.RefreshTokens(user, rotatedToken, RotationIp);
+    Assert.NotNull(rotation);
+    _fixture.StartNewRequest();
+
+    Assert.True(await _fixture.TokenService.RevokeSession(rotatedRawToken, user.Id, TokenServiceFixture.IpAddress));
+
+    _fixture.StartNewRequest();
+    Assert.Null(await _fixture.TokenService.FindActiveRefreshToken(rotation.Value.refreshToken, TokenServiceFixture.IpAddress));
+  }
+
+  [Fact]
+  public async Task RevokeSession_AlreadyRevokedSession_ReturnsFalseAndKeepsFirstRevocation()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (loggedOut, loggedOutRawToken) = await _fixture.AddRefreshTokenAsync(user);
+    Assert.True(await _fixture.TokenService.RevokeSession(loggedOutRawToken, user.Id, TokenServiceFixture.IpAddress));
+    var firstRevocation = (await _fixture.ReloadRefreshTokenAsync(loggedOut.Id)).RevokedAt;
+
+    Assert.False(await _fixture.TokenService.RevokeSession(loggedOutRawToken, user.Id, AttackerIp));
+
+    var reloaded = await _fixture.ReloadRefreshTokenAsync(loggedOut.Id);
+    Assert.Equal(firstRevocation, reloaded.RevokedAt);
+    Assert.Equal(TokenServiceFixture.IpAddress, reloaded.RevokedByIp);
+  }
+
+  [Fact]
+  public async Task RevokeSession_TokenOfAnotherUser_ReturnsFalseAndKeepsItActive()
+  {
+    var user = await _fixture.CreateUserAsync("alice");
+    var otherUser = await _fixture.CreateUserAsync("bob");
+    var (otherUserToken, otherUserRawToken) = await _fixture.AddRefreshTokenAsync(otherUser);
+    await _fixture.AddRefreshTokenAsync(user);
+
+    Assert.False(await _fixture.TokenService.RevokeSession(otherUserRawToken, user.Id, AttackerIp));
+
+    Assert.Null((await _fixture.ReloadRefreshTokenAsync(otherUserToken.Id)).RevokedAt);
+    Assert.Equal(0, await _fixture.DbContext.RefreshTokens.AsNoTracking().CountAsync(rt => rt.RevokedAt != null));
+  }
+
+  [Fact]
+  public async Task RevokeSession_UnknownToken_ReturnsFalse()
+  {
+    var user = await _fixture.CreateUserAsync();
+    await _fixture.AddRefreshTokenAsync(user);
+
+    Assert.False(await _fixture.TokenService.RevokeSession("unknown-token", user.Id, TokenServiceFixture.IpAddress));
+
+    Assert.Equal(0, await _fixture.DbContext.RefreshTokens.AsNoTracking().CountAsync(rt => rt.RevokedAt != null));
+  }
+
+  [Fact]
   public async Task RevokeAllSessions_RevokesOnlyActiveTokensOfThatUser()
   {
     var user = await _fixture.CreateUserAsync("alice");
@@ -169,7 +281,7 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
     alreadyRevoked.RevokedByIp = "192.168.0.1";
     await _fixture.DbContext.SaveChangesAsync();
 
-    await _fixture.TokenService.RevokeAllSessions(user.Id, AttackerIp);
+    Assert.True(await _fixture.TokenService.RevokeAllSessions(user.Id, AttackerIp));
 
     var reloadedActive = await _fixture.ReloadRefreshTokenAsync(active.Id);
     Assert.NotNull(reloadedActive.RevokedAt);
@@ -197,9 +309,22 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
-  public async Task RevokeAllSessions_UnknownUser_DoesNotThrow()
+  public async Task RevokeAllSessions_NoActiveSessions_ReturnsFalseAndStillUpdatesSecurityStamp()
   {
-    await _fixture.TokenService.RevokeAllSessions(Guid.NewGuid(), TokenServiceFixture.IpAddress);
+    var user = await _fixture.CreateUserAsync();
+    var (_, loggedOutRawToken) = await _fixture.AddRefreshTokenAsync(user);
+    Assert.True(await _fixture.TokenService.RevokeSession(loggedOutRawToken, user.Id, TokenServiceFixture.IpAddress));
+    var stampBefore = await _fixture.GetPersistedSecurityStampAsync(user.Id);
+
+    Assert.False(await _fixture.TokenService.RevokeAllSessions(user.Id, TokenServiceFixture.IpAddress));
+
+    Assert.NotEqual(stampBefore, await _fixture.GetPersistedSecurityStampAsync(user.Id));
+  }
+
+  [Fact]
+  public async Task RevokeAllSessions_UnknownUser_ReturnsFalse()
+  {
+    Assert.False(await _fixture.TokenService.RevokeAllSessions(Guid.NewGuid(), TokenServiceFixture.IpAddress));
   }
 
   [Fact]
@@ -219,6 +344,7 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
     Assert.NotNull(newToken);
     Assert.Equal(user.Id, newToken.UserId);
     Assert.Equal(RotationIp, newToken.CreatedByIp);
+    Assert.Equal(oldToken.SessionId, newToken.SessionId);
 
     var reloadedOld = await _fixture.ReloadRefreshTokenAsync(oldToken.Id);
     Assert.NotNull(reloadedOld.RevokedAt);

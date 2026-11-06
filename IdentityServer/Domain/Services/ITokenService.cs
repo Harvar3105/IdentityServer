@@ -11,7 +11,7 @@ public interface ITokenService
   Task<bool> IsSecurityStampValid(ClaimsPrincipal principal);
   Task<RefreshToken?> FindActiveRefreshToken(string rawToken, string ipAddress);
   Task<bool> RevokeSession(string rawRefreshToken, Guid userId, string ipAddress);
-  Task RevokeAllSessions(Guid userId, string ipAddress);
+  Task<bool> RevokeAllSessions(Guid userId, string ipAddress);
   Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress);
   Task<bool> TryRevokeRefreshToken(RefreshToken newToken, RefreshToken oldToken, string ipAddress);
   string HashToken(string token);
