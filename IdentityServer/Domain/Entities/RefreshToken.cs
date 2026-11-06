@@ -14,8 +14,10 @@ public class RefreshToken
   public DateTime? RevokedAt { get; set; }
   public string? RevokedByIp { get; set; }
   public string? ReplacedByTokenHash { get; set; }
-  // TODO: Add an indexed FamilyId shared by all tokens rotated from one login, so that reuse of a revoked token
-  // revokes only the compromised session instead of every session of the user (see TokenService.FindActiveRefreshToken).
+  // Shared by every token rotated from one sign-in (password login or registration), i.e. identifies one session.
+  // TODO: Use FamilyId in reuse detection so that reuse of a rotated token revokes only the compromised session
+  // instead of every session of the user (see TokenService.FindActiveRefreshToken).
+  public Guid FamilyId { get; set; }
   public Guid UserId { get; set; }
   [JsonIgnore]
   public User User { get; set; } = null!;

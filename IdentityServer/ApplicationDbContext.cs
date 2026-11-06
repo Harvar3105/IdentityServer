@@ -26,6 +26,9 @@ public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClai
       .HasForeignKey(rt => rt.UserId)
       .OnDelete(DeleteBehavior.Cascade);
 
+    builder.Entity<RefreshToken>()
+      .HasIndex(rt => rt.FamilyId);
+
     builder.Entity<User>()
       .HasMany(u => u.Claims)
       .WithOne()
