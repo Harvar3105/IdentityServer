@@ -10,6 +10,8 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Services;
 
+// TODO: Periodically delete expired and revoked refresh tokens (e.g. a hosted background service), keeping revoked
+// ones for a retention period long enough for reuse detection to still recognize them.
 public class TokenService : ITokenService
 {
   private const string SecurityStampClaimType = "sstamp";
@@ -44,6 +46,8 @@ public class TokenService : ITokenService
     var roles = await _userManager.GetRolesAsync(user);
     claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
+    // TODO: Switch from HMAC-SHA256 to RS256/ES256 and publish the public key via a JWKS endpoint: with a shared
+    // symmetric secret every resource server that validates tokens locally can also issue them.
     var key = _twp.IssuerSigningKey;
     var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -99,7 +103,8 @@ public class TokenService : ITokenService
   }
 
   // Only the hash is persisted; the raw token is handed to the client and never stored.
-  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user)
+  // Without sessionId the token starts a new session; rotation passes the session of the token it replaces.
+  public (RefreshToken entity, string rawToken) GenerateRefreshToken(string ipAddress, User user, Guid? sessionId = null)
   {
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     var hash = HashToken(rawToken);
@@ -107,6 +112,7 @@ public class TokenService : ITokenService
     var entity = new RefreshToken
     {
       UserId = user.Id,
+      SessionId = sessionId ?? Guid.NewGuid(),
       TokenHash = hash,
       CreatedAt = DateTime.UtcNow,
       CreatedByIp = ipAddress,
@@ -124,20 +130,39 @@ public class TokenService : ITokenService
 
     if (refreshToken.RevokedAt != null)
     {
+      // Only a rotated token (it has a successor) signals theft. A token revoked by logout or by revoking all
+      // sessions has no successor and is simply rejected, so a late request from a logged-out client is harmless.
+      if (refreshToken.ReplacedByTokenHash == null) return null;
+
       _logger.LogWarning("💥Revoked refresh token reused for user {UserId}; revoking all active refresh tokens", refreshToken.UserId);
-      await RevokeAllRefreshTokens(refreshToken.UserId, ipAddress);
+      await RevokeAllSessions(refreshToken.UserId, ipAddress);
       return null;
     }
 
     return refreshToken.IsActive ? refreshToken : null;
   }
 
-  public async Task RevokeAllRefreshTokens(Guid userId, string ipAddress)
+  public async Task<bool> RevokeSession(string rawRefreshToken, Guid userId, string ipAddress)
+  {
+    var tokenHash = HashToken(rawRefreshToken);
+    var revokedAt = DateTime.UtcNow;
+    var affectedRows = await _dbContext.RefreshTokens
+      .Where(rt => rt.UserId == userId && rt.RevokedAt == null &&
+        _dbContext.RefreshTokens.Any(presented =>
+          presented.TokenHash == tokenHash && presented.UserId == userId && presented.SessionId == rt.SessionId))
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, revokedAt)
+        .SetProperty(rt => rt.RevokedByIp, ipAddress));
+
+    return affectedRows > 0;
+  }
+
+  public async Task<bool> RevokeAllSessions(Guid userId, string ipAddress)
   {
     // FIXME: ExecuteUpdateAsync bypasses the change tracker: refresh tokens already tracked by this DbContext
     // keep RevokedAt == null and still report IsActive == true for the rest of the request.
     var revokedAt = DateTime.UtcNow;
-    await _dbContext.RefreshTokens
+    var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
@@ -145,11 +170,13 @@ public class TokenService : ITokenService
 
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user != null) await _userManager.UpdateSecurityStampAsync(user);
+
+    return affectedRows > 0;
   }
 
   public async Task<(string token, string refreshToken)?> RefreshTokens(User user, RefreshToken oldToken, string ipAddress)
   {
-    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user);
+    var (newRefreshToken, newRawRefreshToken) = GenerateRefreshToken(ipAddress, user, oldToken.SessionId);
 
     await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 

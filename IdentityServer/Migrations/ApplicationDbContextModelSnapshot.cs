@@ -82,6 +82,9 @@ namespace IdentityServer.Migrations
                     b.Property<string>("RevokedByIp")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -90,6 +93,8 @@ namespace IdentityServer.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SessionId");
 
                     b.HasIndex("UserId");
 

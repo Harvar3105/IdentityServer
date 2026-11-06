@@ -1,6 +1,8 @@
+using IdentityServer.Controllers.Contracts;
 using IdentityServer.Domain.Dtos;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using IdentityServer.Middleware;
 using Microsoft.AspNetCore.Mvc;
@@ -20,14 +22,16 @@ public class AuthController : ControllerBase
   private readonly ITokenService _tokenService;
   private readonly ApplicationDbContext _dbContext;
   private readonly RoleSettings _roleSettings;
+  private readonly ILogger<AuthController> _logger;
 
-  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context, IOptions<RoleSettings> roleSettings)
+  public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, ITokenService tokenService, ApplicationDbContext context, IOptions<RoleSettings> roleSettings, ILogger<AuthController> logger)
   {
     _userManager = userManager;
     _signInManager = signInManager;
     _tokenService = tokenService;
     _dbContext = context;
     _roleSettings = roleSettings.Value;
+    _logger = logger;
   }
 
   [HttpPost("register")]
@@ -79,6 +83,35 @@ public class AuthController : ControllerBase
 
     return BadRequest("Could not find suitable auth method!");
   }
+
+  // Always 204: the response does not reveal whether the token existed, belonged to the caller or was already revoked.
+  [HttpPost("logout")]
+  [Authorize]
+  public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+  {
+    if (!TryGetCurrentUserId(out var userId)) return Unauthorized();
+
+    if (!await _tokenService.RevokeSession(request.RefreshToken, userId, GetIpAddress()))
+      _logger.LogWarning("⚠️Logout of user {UserId} revoked nothing: token unknown, foreign or already revoked", userId);
+
+    return NoContent();
+  }
+
+  [HttpPost("logoutAll")]
+  [Authorize]
+  public async Task<IActionResult> LogoutAll()
+  {
+    if (!TryGetCurrentUserId(out var userId)) return Unauthorized();
+
+    if (!await _tokenService.RevokeAllSessions(userId, GetIpAddress()))
+      _logger.LogWarning("⚠️Logout from all sessions of user {UserId} revoked no refresh tokens: no active sessions", userId);
+
+    return NoContent();
+  }
+
+  private bool TryGetCurrentUserId(out Guid userId) => Guid.TryParse(_userManager.GetUserId(User), out userId);
+
+  private string GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
   private async Task<IActionResult> LoginWithTokens(DataModel model)
   {
@@ -169,6 +202,8 @@ public class AuthController : ControllerBase
 
 }
 
+// TODO: Split the shared DataModel into dedicated request contracts per endpoint (register, login, refresh)
+// in Controllers/Contracts, so that each endpoint accepts only its own fields. Changes the public JSON contract.
 public class DataModel
 {
   public Guid? Id { get; set; }
