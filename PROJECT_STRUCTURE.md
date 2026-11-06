@@ -51,16 +51,17 @@ IdentityServer/                      # repository root
 │       └── Services/
 │           ├── TokenServiceFixture.cs    # real TokenService + Identity on SQLite in-memory (ExecuteUpdate support)
 │           ├── TokenServiceAccessTokenTests.cs   # JWT claims, signature/issuer/audience/alg/lifetime checks, security stamp
-│           └── TokenServiceRefreshTokenTests.cs  # hashing, lookup, rotation, single-use revocation, reuse detection
+│           └── TokenServiceRefreshTokenTests.cs  # hashing, lookup, rotation, sessions, logout, reuse detection
 └── IdentityServer/                  # the Web API project
     ├── IdentityServer.csproj        # copies instances/*.json (except templates) to config/ in the output
-    ├── IdentityServer.http          # HTTP scratch requests (still the template stub)
     ├── Program.cs                   # configuration, DI, auth, CORS, pipeline, migration + seeding
     ├── ApplicationDbContext.cs      # IdentityDbContext + RefreshTokens DbSet
     ├── Properties/
     │   └── launchSettings.json      # http :5078, https :7066
     ├── Controllers/
-    │   ├── AuthController.cs        # register / login; also defines shared DataModel
+    │   ├── Contracts/               # per-endpoint request contracts
+    │   │   └── LogoutRequest.cs     # { refreshToken } body for logout
+    │   ├── AuthController.cs        # register / login / logout / logoutAll; also defines shared DataModel
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
     │   └── ProfilePictureController.cs  # upload / get (ETag, 304) / delete profile picture
@@ -77,7 +78,7 @@ IdentityServer/                      # repository root
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
     │   │   ├── UserClaim.cs         # IdentityUserClaim<Guid>
-    │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain
+    │   │   ├── RefreshToken.cs      # hash, expiry, revocation, rotation chain, SessionId
     │   │   └── ProfilePicture.cs    # uploaded image bytes + metadata, one per user (own table)
     │   ├── Repositories/
     │   │   └── IProfilePictureRepository.cs  # profile picture storage contract
@@ -94,11 +95,12 @@ IdentityServer/                      # repository root
     ├── Services/
     │   ├── ImageInspector.cs        # format detection by signature + width/height from JPEG/PNG/WebP headers
     │   ├── ProfilePictureService.cs # upload validation (size, format, dimensions), hashing, get / delete
-    │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, revocation
+    │   └── TokenService.cs          # JWT creation/validation, refresh-token lookup, rotation, session revocation
     ├── Middleware/
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
-    └── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation)
+    └── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation,
+                                     # AddRefreshTokenSessionId)
 ```
 
 ## Configuration
@@ -120,7 +122,7 @@ Missing required keys stop the application at startup with an explicit error.
 |------------------------------------|------------------------------------------------------|
 | `JWTSecret`                        | HMAC signing key (at least 32 bytes)                 |
 | `JWTIssuer` / `JWTAudience`        | Issuer / audience of this instance                   |
-| `JWTExpiration`                    | Access token lifetime, minutes                       |
+| `JWTExpiration`                    | Access token lifetime, minutes; also how long a logged-out access token is still accepted by servers that validate it locally |
 | `RTExpiration`                     | Refresh token lifetime, days                         |
 | `CredentialRateLimitPermits`       | Max requests per IP to `/api/auth/*` per window      |
 | `CredentialRateLimitWindowSeconds` | Rate limit window, seconds                           |
@@ -164,6 +166,8 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 |--------|----------------------------------------|-------------------------|-------------|
 | POST   | `/api/auth/register`                   | none, rate limited      | Creates a user with `Roles:Initial`, returns user + tokens |
 | POST   | `/api/auth/login`                      | none, rate limited      | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
+| POST   | `/api/auth/logout`                     | authenticated, limited  | Body `{ refreshToken }`; revokes the session of that refresh token; always 204 |
+| POST   | `/api/auth/logoutAll`                  | authenticated, limited  | Revokes every session of the caller and changes the security stamp; always 204 |
 | POST   | `/api/token/refresh`                   | none                    | Rotates a refresh token and issues a new access token |
 | POST   | `/api/token/validate`                  | none                    | Validates an access token passed as a raw JSON string body |
 | POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available` |
@@ -190,14 +194,24 @@ dimensions are validated. Oversized uploads are rejected while reading: 413 from
   registered in `Program.cs` (1 minute clock skew). JWT Bearer is the default authentication
   scheme (overriding the cookie defaults set by `AddIdentity`).
 - **Refresh token**: 64 random bytes. The client receives the raw value; only its SHA-256 hash
-  is stored. Every password login creates an independent session (token).
+  is stored.
+- **Session**: every password login or registration starts a session with a new `SessionId`;
+  rotation copies it to the new token, so all tokens rotated from one sign-in share it. One user
+  can have several sessions (devices, browsers).
 - **Rotation**: the old token is revoked by a conditional `UPDATE` inside a transaction, so of
   several concurrent requests with the same token only one succeeds.
-- **Reuse detection**: presenting an already revoked token revokes all active refresh tokens
-  of its user and changes their security stamp.
+- **Logout** (`/api/auth/logout`): revokes every active token of the session the presented token
+  belongs to, even if that token was already rotated (another tab, or a thief who refreshed first).
+  The security stamp is kept, so other sessions stay signed in; access tokens of the session stay
+  valid until they expire.
+- **Logout from all sessions** (`/api/auth/logoutAll`): revokes every active refresh token of the
+  user and changes the security stamp.
+- **Reuse detection**: presenting a rotated token (one that has a successor) revokes all active
+  refresh tokens of its user and changes their security stamp. A token revoked by logout has no
+  successor and is only rejected, so a late request from a logged-out client is harmless.
 - **Security stamp**: every access token check (JWT Bearer `OnTokenValidated` and
-  `/api/token/validate`) compares `sstamp` with the user's current stamp. Role changes and
-  reuse detection change the stamp, so access tokens issued before them are rejected at once
+  `/api/token/validate`) compares `sstamp` with the user's current stamp. Role changes, logout
+  from all sessions and reuse detection change the stamp, so access tokens issued before them are rejected at once
   (costs one user lookup per authenticated request).
 
 ## Request Pipeline (Program.cs order)
@@ -226,11 +240,13 @@ project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- `DataModel.RefreshTokenHash` should be renamed to `RefreshToken` (public contract change).
-- Refresh tokens have no `FamilyId`, so reuse detection revokes every session of the user.
+- The shared `DataModel` should be split into per-endpoint contracts in `Controllers/Contracts`,
+  renaming `RefreshTokenHash` to `RefreshToken` (public contract change).
+- Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
+- `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
 - The `dbcreator` role of `DB_USER` also allows creating databases of other names and dropping
   databases the login owns.
-- No logout endpoint and no cleanup of expired/revoked refresh tokens yet.
+- No cleanup of expired/revoked refresh tokens yet.
 - Access tokens are signed with a shared HMAC secret, so any resource server that validates them
   locally can also issue them; RS256/ES256 with a JWKS endpoint is planned.
