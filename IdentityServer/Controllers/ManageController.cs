@@ -1,4 +1,4 @@
-using IdentityServer.Domain.Dtos;
+using IdentityServer.Controllers.Contracts;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace IdentityServer.Controllers;
 
+// FIXME: An unknown userId returns 400 "User not found!" here, while ProfilePictureController answers 404.
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
@@ -23,6 +24,7 @@ public class ManageController : ControllerBase
   }
 
   [HttpPost("assignRole")]
+  [ProducesResponseType<UserRolesResponse>(StatusCodes.Status200OK)]
   public async Task<IActionResult> AssignRole([FromBody] UserRoleRequest request)
   {
     if (!_roleSettings.IsAvailable(request.Role)) return BadRequest($"Role {request.Role} does not exist!");
@@ -36,10 +38,11 @@ public class ManageController : ControllerBase
 
     await _userManager.UpdateSecurityStampAsync(user);
 
-    return Ok("Assigned");
+    return Ok(await CreateUserRolesResponse(user));
   }
 
   [HttpPost("removeRole")]
+  [ProducesResponseType<UserRolesResponse>(StatusCodes.Status200OK)]
   public async Task<IActionResult> RemoveRole([FromBody] UserRoleRequest request)
   {
     if (!CanManageRole(request.Role)) return Forbid();
@@ -55,30 +58,35 @@ public class ManageController : ControllerBase
 
     await _userManager.UpdateSecurityStampAsync(user);
 
-    return Ok("Removed");
+    return Ok(await CreateUserRolesResponse(user));
   }
 
   [HttpGet("userRoles")]
-  public async Task<IActionResult> GetUserRoles([FromQuery] Guid userId)
+  [ProducesResponseType<UserRolesResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> GetUserRoles([FromQuery] UserRolesQuery query)
   {
-    if (!IsRoleManagerOrSelf(userId)) return Forbid();
+    if (!IsRoleManagerOrSelf(query.UserId)) return Forbid();
 
-    var user = await _userManager.FindByIdAsync(userId.ToString());
+    var user = await _userManager.FindByIdAsync(query.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    return Ok(await _userManager.GetRolesAsync(user));
+    return Ok(await CreateUserRolesResponse(user));
   }
 
   [HttpGet("hasRole")]
-  public async Task<IActionResult> CheckUserRole([FromQuery] Guid userId, [FromQuery] string role)
+  [ProducesResponseType<HasRoleResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> CheckUserRole([FromQuery] HasRoleQuery query)
   {
-    if (!IsRoleManagerOrSelf(userId)) return Forbid();
+    if (!IsRoleManagerOrSelf(query.UserId)) return Forbid();
 
-    var user = await _userManager.FindByIdAsync(userId.ToString());
+    var user = await _userManager.FindByIdAsync(query.UserId.ToString());
     if (user is null) return BadRequest("User not found!");
 
-    return Ok(await _userManager.IsInRoleAsync(user, role));
+    return Ok(new HasRoleResponse { HasRole = await _userManager.IsInRoleAsync(user, query.Role) });
   }
+
+  private async Task<UserRolesResponse> CreateUserRolesResponse(User user) =>
+    new() { UserId = user.Id, Roles = await _userManager.GetRolesAsync(user) };
 
   // Root can manage every role; managers can manage only roles that are neither root nor manager roles.
   private bool CanManageRole(string role)

@@ -69,7 +69,12 @@ IdentityServer/                      # repository root
     │   │   ├── AuthResponse.cs      # register / login: user, roles, new token pair
     │   │   ├── SessionResponse.cs   # session: user, roles, rotated token pair if the refresh token was used
     │   │   ├── TokenPairResponse.cs # refresh: rotated token pair
-    │   │   └── ValidateTokenResponse.cs  # validate: { valid }
+    │   │   ├── ValidateTokenResponse.cs  # validate: { valid }
+    │   │   ├── UserRoleRequest.cs   # { userId, role } body for assignRole / removeRole
+    │   │   ├── UserRolesQuery.cs    # ?userId= for userRoles
+    │   │   ├── HasRoleQuery.cs      # ?userId=&role= for hasRole
+    │   │   ├── UserRolesResponse.cs # { userId, roles }
+    │   │   └── HasRoleResponse.cs   # { hasRole }
     │   ├── AuthController.cs        # register / login / session / logout / logoutAll
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
@@ -80,8 +85,7 @@ IdentityServer/                      # repository root
     │   ├── Dtos/
     │   │   ├── ImageInfo.cs         # detected content type + width/height of an image
     │   │   ├── ProfilePictureMetadata.cs  # picture metadata without the image bytes
-    │   │   ├── UserDTO.cs           # public user projection
-    │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
+    │   │   └── UserDTO.cs           # public user projection
     │   ├── Entities/                # namespace: IdentityServer.Entities
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
@@ -179,10 +183,10 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 | POST   | `/api/auth/logoutAll`                  | authenticated, limited  | Revokes every session of the caller and changes the security stamp; always 204 |
 | POST   | `/api/token/refresh`                   | none                    | Body `{ refreshToken }`; rotates it, returns `{ accessToken, refreshToken }` |
 | POST   | `/api/token/validate`                  | none                    | Body `{ accessToken }`; always 200 with `{ valid }` |
-| POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available` |
-| POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role |
-| GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Lists the user's roles |
-| GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns whether the user has the role |
+| POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available`, returns `{ userId, roles }` |
+| POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role; returns `{ userId, roles }` |
+| GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Returns `{ userId, roles }` |
+| GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns `{ hasRole }` |
 | PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns its metadata |
 | GET    | `/api/profilePicture/{userId}`         | none                    | Image bytes with `ETag`/`Last-Modified`; `If-None-Match` gives 304 |
 | DELETE | `/api/profilePicture`                  | any authenticated user  | Deletes the caller's picture; 404 if there is none |
@@ -250,6 +254,7 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
+- `/api/manage/*` answers 400 for an unknown `userId`, while `/api/profilePicture` uses 404.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
