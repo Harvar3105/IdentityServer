@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using IdentityServer.Middleware;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -46,9 +47,18 @@ public class AuthController : ControllerBase
       Email = request.Email,
     };
 
-    // FIXME: A registration that loses a race on the unique username/email index gets DbUpdateException (500)
-    // instead of a DuplicateUserName/DuplicateEmail error.
-    var result = await _userManager.CreateAsync(user, request.Password);
+    IdentityResult result;
+    try
+    {
+      result = await _userManager.CreateAsync(user, request.Password);
+    }
+    catch (DbUpdateException exception) when (IsUniqueIndexViolation(exception))
+    {
+      // Identity's duplicate check passed, but a concurrent registration took the username or email first.
+      var duplicateErrors = await DescribeTakenIdentifiers(request.Username, request.Email);
+      if (duplicateErrors.Count == 0) throw;
+      return BadRequest(duplicateErrors);
+    }
     if (!result.Succeeded) return BadRequest(result.Errors);
 
     var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(GetIpAddress(), user);
@@ -167,4 +177,18 @@ public class AuthController : ControllerBase
   private bool TryGetCurrentUserId(out Guid userId) => Guid.TryParse(_userManager.GetUserId(User), out userId);
 
   private string GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+  // 2601: duplicate key in a unique index, 2627: unique constraint violation.
+  private static bool IsUniqueIndexViolation(DbUpdateException exception) =>
+    exception.InnerException is SqlException { Number: 2601 or 2627 };
+
+  private async Task<List<IdentityError>> DescribeTakenIdentifiers(string username, string email)
+  {
+    var errors = new List<IdentityError>();
+    if (await _userManager.FindByNameAsync(username) != null)
+      errors.Add(_userManager.ErrorDescriber.DuplicateUserName(username));
+    if (await _userManager.FindByEmailAsync(email) != null)
+      errors.Add(_userManager.ErrorDescriber.DuplicateEmail(email));
+    return errors;
+  }
 }
