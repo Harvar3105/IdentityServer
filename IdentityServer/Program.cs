@@ -62,8 +62,7 @@ builder.Services.AddIdentity<User, Role>(options =>
     passwordPolicySection.Bind(options.Password);
 
     // Login by email requires one user per email: FindByEmailAsync throws when several users share it.
-    // TODO: Back this with a unique index on NormalizedEmail: the check runs in the application, so two
-    // concurrent registrations with one email can both pass it. Existing duplicates must be resolved first.
+    // Also enforced by the unique EmailIndex (see ApplicationDbContext).
     options.User.RequireUniqueEmail = true;
 
     options.Lockout.AllowedForNewUsers = lockoutAllowedForNewUsers;

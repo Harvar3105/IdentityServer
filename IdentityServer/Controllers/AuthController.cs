@@ -46,6 +46,8 @@ public class AuthController : ControllerBase
       Email = request.Email,
     };
 
+    // FIXME: A registration that loses a race on the unique username/email index gets DbUpdateException (500)
+    // instead of a DuplicateUserName/DuplicateEmail error.
     var result = await _userManager.CreateAsync(user, request.Password);
     if (!result.Succeeded) return BadRequest(result.Errors);
 

@@ -108,7 +108,7 @@ IdentityServer/                      # repository root
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
     └── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation,
-                                     # AddRefreshTokenSessionId)
+                                     # AddRefreshTokenSessionId, MakeEmailIndexUnique)
 ```
 
 ## Configuration
@@ -250,8 +250,8 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
-- Email uniqueness (`User.RequireUniqueEmail`) is checked only by Identity, without a unique index
-  on `NormalizedEmail`, so concurrent registrations with one email can both succeed.
+- A registration that loses a race on the unique username/email index fails with 500 instead of
+  a `DuplicateUserName`/`DuplicateEmail` error.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
