@@ -64,9 +64,13 @@ IdentityServer/                      # repository root
     │   │   ├── LoginRequest.cs      # { username | email, password }
     │   │   ├── SessionRequest.cs    # { accessToken?, refreshToken? }, at least one
     │   │   ├── LogoutRequest.cs     # { refreshToken } body for logout
+    │   │   ├── RefreshRequest.cs    # { refreshToken }
+    │   │   ├── ValidateTokenRequest.cs  # { accessToken }
     │   │   ├── AuthResponse.cs      # register / login: user, roles, new token pair
-    │   │   └── SessionResponse.cs   # session: user, roles, rotated token pair if the refresh token was used
-    │   ├── AuthController.cs        # register / login / session / logout / logoutAll; also defines DataModel (refresh only)
+    │   │   ├── SessionResponse.cs   # session: user, roles, rotated token pair if the refresh token was used
+    │   │   ├── TokenPairResponse.cs # refresh: rotated token pair
+    │   │   └── ValidateTokenResponse.cs  # validate: { valid }
+    │   ├── AuthController.cs        # register / login / session / logout / logoutAll
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
     │   └── ProfilePictureController.cs  # upload / get (ETag, 304) / delete profile picture
@@ -76,7 +80,6 @@ IdentityServer/                      # repository root
     │   ├── Dtos/
     │   │   ├── ImageInfo.cs         # detected content type + width/height of an image
     │   │   ├── ProfilePictureMetadata.cs  # picture metadata without the image bytes
-    │   │   ├── ResponseDTO.cs       # common response envelope
     │   │   ├── UserDTO.cs           # public user projection
     │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
     │   ├── Entities/                # namespace: IdentityServer.Entities
@@ -174,8 +177,8 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 | POST   | `/api/auth/session`                    | none, rate limited      | Body `{ accessToken?, refreshToken? }`; returns `{ user, roles }` for a valid access token, otherwise rotates the refresh token and also returns the new `accessToken`/`refreshToken` |
 | POST   | `/api/auth/logout`                     | authenticated, limited  | Body `{ refreshToken }`; revokes the session of that refresh token; always 204 |
 | POST   | `/api/auth/logoutAll`                  | authenticated, limited  | Revokes every session of the caller and changes the security stamp; always 204 |
-| POST   | `/api/token/refresh`                   | none                    | Rotates a refresh token and issues a new access token |
-| POST   | `/api/token/validate`                  | none                    | Validates an access token passed as a raw JSON string body |
+| POST   | `/api/token/refresh`                   | none                    | Body `{ refreshToken }`; rotates it, returns `{ accessToken, refreshToken }` |
+| POST   | `/api/token/validate`                  | none                    | Body `{ accessToken }`; always 200 with `{ valid }` |
 | POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available` |
 | POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role |
 | GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Lists the user's roles |
@@ -190,8 +193,6 @@ from the file signature (the client file name and Content-Type are ignored), the
 dimensions are validated. Oversized uploads are rejected while reading: 413 from the service, or
 400 if the multipart body exceeds the limit before the file reaches it. Pictures are served with
 `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`.
-
-`refreshTokenHash` in the `/api/token/refresh` body carries the raw refresh token despite its name.
 
 Invalid request bodies are rejected with 400 and a `ValidationProblemDetails` body.
 
@@ -248,9 +249,7 @@ project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- `DataModel` and `ResponseDTO` are still used by `TokenController`; they should be replaced with
-  per-endpoint contracts in `Controllers/Contracts`, renaming `RefreshTokenHash` to `RefreshToken`
-  (public contract change).
+- `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
 - `User.RequireUniqueEmail` is not set, so duplicate emails are accepted and break login by email.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
