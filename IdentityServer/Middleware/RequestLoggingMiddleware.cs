@@ -120,7 +120,7 @@ public class RequestLoggingMiddleware
       return "[non-JSON body omitted]";
     }
 
-    // A bare JSON value (e.g. the raw token sent to /api/token/validate) has no field name to classify it by.
+    // A bare JSON value has no field name to classify it by.
     if (root is null or JsonValue) return MaskedValue;
 
     MaskSensitiveFields(root);

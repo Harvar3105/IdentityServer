@@ -166,22 +166,3 @@ public class AuthController : ControllerBase
 
   private string GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 }
-
-// TODO: Remove once TokenController.RefreshJWTToken has its own request contract; no other endpoint uses it.
-public class DataModel
-{
-  public Guid? Id { get; set; }
-  public string? Username { get; set; }
-  public string? Password { get; set; }
-  public string? Email { get; set; }
-  public ICollection<string>? Roles { get; set; }
-
-  public string? AccessToken { get; set; }
-  // TODO: Rename to RefreshToken: clients now send the raw token, not its hash. Changes the public JSON contract.
-  public string? RefreshTokenHash { get; set; }
-
-  public override string ToString()
-  {
-    return $"{Username}\n{Email}\n{RefreshTokenHash}\n{AccessToken}";
-  }
-}
