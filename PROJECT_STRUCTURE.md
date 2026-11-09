@@ -255,7 +255,6 @@ project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
 - `/api/manage/*` answers 400 for an unknown `userId`, while `/api/profilePicture` uses 404.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.

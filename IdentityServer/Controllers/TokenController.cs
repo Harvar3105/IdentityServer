@@ -9,6 +9,9 @@ namespace IdentityServer.Controllers;
 [ApiController]
 public class TokenController : ControllerBase
 {
+  // Same text as /api/auth/session uses for a rejected token.
+  private const string RejectedTokenMessage = "Invalid or expired token";
+
   private readonly ITokenService _tokenService;
   private readonly ILogger<TokenController> _logger;
   private readonly ApplicationDbContext _dbContext;
@@ -20,8 +23,8 @@ public class TokenController : ControllerBase
     _dbContext = dbContext;
   }
 
-  // FIXME: A rejected refresh token returns 400 here but 401 from /api/auth/session, and "User not found"
-  // tells the caller more than "Invalid or expired refresh token" does.
+  // Every rejection gets the same 401 and message as /api/auth/session, so the caller cannot tell the reasons apart;
+  // the actual reason is only logged.
   [HttpPost("refresh")]
   [ProducesResponseType<TokenPairResponse>(StatusCodes.Status200OK)]
   public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
@@ -32,21 +35,21 @@ public class TokenController : ControllerBase
     if (refreshToken == null)
     {
       _logger.LogError("💥Invalid or expired refresh token");
-      return BadRequest("Invalid or expired refresh token");
+      return Unauthorized(RejectedTokenMessage);
     }
 
     var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(refreshToken.UserId));
     if (user == null)
     {
       _logger.LogError("💥User not found for refresh token");
-      return BadRequest("User not found");
+      return Unauthorized(RejectedTokenMessage);
     }
 
     var result = await _tokenService.RefreshTokens(user, refreshToken, ipAddress);
     if (result == null)
     {
       _logger.LogError("💥Refresh token was already used by a concurrent request");
-      return BadRequest("Invalid or expired refresh token");
+      return Unauthorized(RejectedTokenMessage);
     }
 
     return Ok(new TokenPairResponse { AccessToken = result.Value.token, RefreshToken = result.Value.refreshToken });
