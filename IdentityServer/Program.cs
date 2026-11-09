@@ -57,11 +57,14 @@ var passwordPolicySection = builder.Configuration.GetSection("Security:Password"
 if (!passwordPolicySection.Exists())
   throw new InvalidOperationException("Security:Password is not configured.");
 
-// FIXME: User.RequireUniqueEmail is not set, so several users can register with one email,
-// and login by email then fails: FindByEmailAsync throws when the email is not unique.
 builder.Services.AddIdentity<User, Role>(options =>
   {
     passwordPolicySection.Bind(options.Password);
+
+    // Login by email requires one user per email: FindByEmailAsync throws when several users share it.
+    // TODO: Back this with a unique index on NormalizedEmail: the check runs in the application, so two
+    // concurrent registrations with one email can both pass it. Existing duplicates must be resolved first.
+    options.User.RequireUniqueEmail = true;
 
     options.Lockout.AllowedForNewUsers = lockoutAllowedForNewUsers;
     options.Lockout.MaxFailedAccessAttempts = lockoutMaxFailedAttempts;

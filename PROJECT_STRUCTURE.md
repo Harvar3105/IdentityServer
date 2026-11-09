@@ -250,7 +250,8 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
-- `User.RequireUniqueEmail` is not set, so duplicate emails are accepted and break login by email.
+- Email uniqueness (`User.RequireUniqueEmail`) is checked only by Identity, without a unique index
+  on `NormalizedEmail`, so concurrent registrations with one email can both succeed.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
