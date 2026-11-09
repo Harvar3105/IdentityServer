@@ -74,7 +74,9 @@ IdentityServer/                      # repository root
     │   │   ├── UserRolesQuery.cs    # ?userId= for userRoles
     │   │   ├── HasRoleQuery.cs      # ?userId=&role= for hasRole
     │   │   ├── UserRolesResponse.cs # { userId, roles }
-    │   │   └── HasRoleResponse.cs   # { hasRole }
+    │   │   ├── HasRoleResponse.cs   # { hasRole }
+    │   │   ├── UploadProfilePictureRequest.cs  # multipart field `file`
+    │   │   └── ProfilePictureResponse.cs  # upload: flat picture metadata
     │   ├── AuthController.cs        # register / login / session / logout / logoutAll
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
@@ -187,7 +189,7 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 | POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role; returns `{ userId, roles }` |
 | GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Returns `{ userId, roles }` |
 | GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns `{ hasRole }` |
-| PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns its metadata |
+| PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns `{ contentType, width, height, sizeBytes, contentHash, updatedAt }` |
 | GET    | `/api/profilePicture/{userId}`         | none                    | Image bytes with `ETag`/`Last-Modified`; `If-None-Match` gives 304 |
 | DELETE | `/api/profilePicture`                  | any authenticated user  | Deletes the caller's picture; 404 if there is none |
 | DELETE | `/api/profilePicture/{userId}`         | root or manager         | Moderation: deletes a user's picture (cannot replace it); managers cannot target root or manager holders; logged |
