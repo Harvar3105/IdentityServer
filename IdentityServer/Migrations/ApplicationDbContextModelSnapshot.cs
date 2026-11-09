@@ -87,7 +87,8 @@ namespace IdentityServer.Migrations
 
                     b.Property<string>("TokenHash")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(44)
+                        .HasColumnType("nvarchar(44)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
@@ -95,6 +96,9 @@ namespace IdentityServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SessionId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
 
                     b.HasIndex("UserId");
 

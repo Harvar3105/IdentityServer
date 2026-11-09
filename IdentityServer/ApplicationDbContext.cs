@@ -30,8 +30,13 @@ public class ApplicationDbContext : IdentityDbContext<User, Role, Guid, UserClai
       .HasForeignKey(rt => rt.UserId)
       .OnDelete(DeleteBehavior.Cascade);
 
-    builder.Entity<RefreshToken>()
-      .HasIndex(rt => rt.SessionId);
+    builder.Entity<RefreshToken>(b =>
+    {
+      b.HasIndex(rt => rt.SessionId);
+      // Every refresh-token lookup searches by the hash. A Base64 SHA-256 hash is always 44 characters.
+      b.Property(rt => rt.TokenHash).HasMaxLength(44);
+      b.HasIndex(rt => rt.TokenHash).IsUnique();
+    });
 
     builder.Entity<User>()
       .HasMany(u => u.Claims)
