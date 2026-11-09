@@ -35,25 +35,21 @@ public class AuthController : ControllerBase
   }
 
   [HttpPost("register")]
-  public async Task<IActionResult> Register([FromBody] DataModel model)
+  [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> Register([FromBody] RegisterRequest request)
   {
-    if (model.Email == null || model.Password == null)
-    {
-      return BadRequest($"Invalid data, {model}");
-    }
-
     var user = new User
     {
-      UserName = model.Username,
+      UserName = request.Username,
       CreatedAt = DateTime.UtcNow,
       LastLogin = DateTime.UtcNow,
-      Email = model.Email,
+      Email = request.Email,
     };
 
-    var result = await _userManager.CreateAsync(user, model.Password);
+    var result = await _userManager.CreateAsync(user, request.Password);
     if (!result.Succeeded) return BadRequest(result.Errors);
 
-    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(GetIpAddress(), user);
     user.RefreshTokens.Add(refreshToken);
 
     await _userManager.AddToRoleAsync(user, _roleSettings.Initial);
@@ -62,26 +58,83 @@ public class AuthController : ControllerBase
     await _dbContext.SaveChangesAsync();
 
     var accessToken = await _tokenService.GenerateAccessToken(user);
-    return Ok(new ResponseDTO{User = new UserDTO(user), AccessToken = accessToken, RefreshToken = rawRefreshToken});
+    return Ok(new AuthResponse
+    {
+      User = new UserDTO(user),
+      Roles = [_roleSettings.Initial],
+      AccessToken = accessToken,
+      RefreshToken = rawRefreshToken
+    });
   }
 
   [HttpPost("login")]
-  public async Task<IActionResult> Login([FromBody] DataModel model)
+  [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> Login([FromBody] LoginRequest request)
   {
-    if (model.Username != null)
+    var user = string.IsNullOrEmpty(request.Username)
+      ? await _userManager.FindByEmailAsync(request.Email!)
+      : await _userManager.FindByNameAsync(request.Username);
+    if (user == null) return Unauthorized("Invalid credentials");
+
+    var result = await _signInManager.PasswordSignInAsync(user, request.Password, isPersistent: false, lockoutOnFailure: true);
+    if (result.IsLockedOut)
+      return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");
+    if (!result.Succeeded)
+      return Unauthorized("Invalid credentials");
+
+    var userRoles = await _userManager.GetRolesAsync(user);
+
+    var accessToken = await _tokenService.GenerateAccessToken(user);
+    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(GetIpAddress(), user);
+    _dbContext.RefreshTokens.Add(refreshToken);
+    user.LastLogin = DateTime.UtcNow;
+    await _dbContext.SaveChangesAsync();
+
+    return Ok(new AuthResponse
     {
-      return await LoginByUsername(model);
-    }
-    else if (model.Email != null)
+      User = new UserDTO(user),
+      Roles = userRoles,
+      AccessToken = accessToken,
+      RefreshToken = rawRefreshToken
+    });
+  }
+
+  // Restores a client session from stored tokens: returns the user and roles, plus a rotated token pair
+  // when only the refresh token is still valid.
+  [HttpPost("session")]
+  [ProducesResponseType<SessionResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> Session([FromBody] SessionRequest request)
+  {
+    var principal = string.IsNullOrEmpty(request.AccessToken)
+      ? null
+      : await _tokenService.ValidateAccessToken(request.AccessToken);
+    if (principal != null)
     {
-      return await LoginByEmail(model);
-    }
-    else if (model.AccessToken != null || model.RefreshTokenHash != null)
-    {
-      return await LoginWithTokens(model);
+      var user = await _userManager.GetUserAsync(principal);
+      if (user == null) return Unauthorized("Invalid or expired token");
+
+      return Ok(new SessionResponse { User = new UserDTO(user), Roles = await _userManager.GetRolesAsync(user) });
     }
 
-    return BadRequest("Could not find suitable auth method!");
+    if (string.IsNullOrEmpty(request.RefreshToken)) return Unauthorized("Invalid or expired token");
+
+    var ipAddress = GetIpAddress();
+    var storedRefreshToken = await _tokenService.FindActiveRefreshToken(request.RefreshToken, ipAddress);
+    if (storedRefreshToken == null) return Unauthorized("Invalid or expired token");
+
+    var tokenOwner = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(storedRefreshToken.UserId));
+    if (tokenOwner == null) return Unauthorized("Invalid or expired token");
+
+    var newTokens = await _tokenService.RefreshTokens(tokenOwner, storedRefreshToken, ipAddress);
+    if (newTokens == null) return Unauthorized("Invalid or expired token");
+
+    return Ok(new SessionResponse
+    {
+      User = new UserDTO(tokenOwner),
+      Roles = await _userManager.GetRolesAsync(tokenOwner),
+      AccessToken = newTokens.Value.token,
+      RefreshToken = newTokens.Value.refreshToken
+    });
   }
 
   // Always 204: the response does not reveal whether the token existed, belonged to the caller or was already revoked.
@@ -112,98 +165,9 @@ public class AuthController : ControllerBase
   private bool TryGetCurrentUserId(out Guid userId) => Guid.TryParse(_userManager.GetUserId(User), out userId);
 
   private string GetIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-  private async Task<IActionResult> LoginWithTokens(DataModel model)
-  {
-    var principal = string.IsNullOrEmpty(model.AccessToken)
-      ? null
-      : await _tokenService.ValidateAccessToken(model.AccessToken);
-    if (principal == null)
-    {
-      if (string.IsNullOrEmpty(model.RefreshTokenHash)) return Unauthorized("Invalid or expired token");
-
-      var login = await TryLoginWithRefreshToken(model.RefreshTokenHash);
-      if (login == null) return Unauthorized("Invalid or expired token");
-
-      return Ok(new
-      {
-        User = new UserDTO(login.Value.User),
-        Roles = login.Value.Roles,
-        AccessToken = login.Value.NewJwt,
-        RefreshToken = login.Value.NewRt
-      });
-    }
-
-    var user = await _userManager.GetUserAsync(principal);
-    if (user == null) return Unauthorized("Invalid or expired token");
-
-    var roles = await _userManager.GetRolesAsync(user);
-    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = roles});
-  }
-
-  private async Task<(User User, IList<string> Roles, string NewJwt, string NewRt)?> TryLoginWithRefreshToken(string refreshToken)
-  {
-    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var rtEntity = await _tokenService.FindActiveRefreshToken(refreshToken, ipAddress);
-    if (rtEntity == null) return null;
-    var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id.Equals(rtEntity.UserId));
-    if (user == null) return null;
-
-    var newTokens = await _tokenService.RefreshTokens(user, rtEntity, ipAddress);
-    if (newTokens == null) return null;
-
-    var roles = await _userManager.GetRolesAsync(user);
-
-    return (User: user, Roles: roles, NewJwt: newTokens.Value.token, NewRt: newTokens.Value.refreshToken);
-  }
-
-  private async Task<IActionResult> LoginByEmail(DataModel model)
-  {
-    if (string.IsNullOrEmpty(model.Email) || string.IsNullOrEmpty(model.Password))
-      return BadRequest("Email or Password is missing");
-
-    var user = await _userManager.FindByEmailAsync(model.Email);
-    if (user == null)
-      return Unauthorized("Invalid credentials");
-
-    return await TryLogin(user, model.Password);
-  }
-
-  private async Task<IActionResult> LoginByUsername(DataModel model)
-  {
-    if (string.IsNullOrEmpty(model.Username) || string.IsNullOrEmpty(model.Password))
-      return BadRequest("Username or Password is missing");
-
-    var user = await _userManager.FindByNameAsync(model.Username);
-    if (user == null)
-      return Unauthorized("Invalid credentials");
-
-    return await TryLogin(user, model.Password);
-  }
-
-  private async Task<IActionResult> TryLogin(User user, string password)
-  {
-    var result = await _signInManager.PasswordSignInAsync(user, password, isPersistent: false, lockoutOnFailure: true);
-    if (result.IsLockedOut)
-      return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again later.");
-    if (!result.Succeeded)
-      return Unauthorized("Invalid credentials");
-
-    var userRoles = await _userManager.GetRolesAsync(user);
-
-    var accessToken = await _tokenService.GenerateAccessToken(user);
-    var (refreshToken, rawRefreshToken) = _tokenService.GenerateRefreshToken(HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", user);
-    _dbContext.RefreshTokens.Add(refreshToken);
-    user.LastLogin = DateTime.UtcNow;
-    await _dbContext.SaveChangesAsync();
-
-    return Ok(new ResponseDTO{User = new UserDTO(user), UserRoles = userRoles, AccessToken = accessToken, RefreshToken = rawRefreshToken});
-  }
-
 }
 
-// TODO: Split the shared DataModel into dedicated request contracts per endpoint (register, login, refresh)
-// in Controllers/Contracts, so that each endpoint accepts only its own fields. Changes the public JSON contract.
+// TODO: Remove once TokenController.RefreshJWTToken has its own request contract; no other endpoint uses it.
 public class DataModel
 {
   public Guid? Id { get; set; }

@@ -59,9 +59,14 @@ IdentityServer/                      # repository root
     ├── Properties/
     │   └── launchSettings.json      # http :5078, https :7066
     ├── Controllers/
-    │   ├── Contracts/               # per-endpoint request contracts
-    │   │   └── LogoutRequest.cs     # { refreshToken } body for logout
-    │   ├── AuthController.cs        # register / login / logout / logoutAll; also defines shared DataModel
+    │   ├── Contracts/               # per-endpoint request and response contracts
+    │   │   ├── RegisterRequest.cs   # { username, email, password }
+    │   │   ├── LoginRequest.cs      # { username | email, password }
+    │   │   ├── SessionRequest.cs    # { accessToken?, refreshToken? }, at least one
+    │   │   ├── LogoutRequest.cs     # { refreshToken } body for logout
+    │   │   ├── AuthResponse.cs      # register / login: user, roles, new token pair
+    │   │   └── SessionResponse.cs   # session: user, roles, rotated token pair if the refresh token was used
+    │   ├── AuthController.cs        # register / login / session / logout / logoutAll; also defines DataModel (refresh only)
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
     │   └── ProfilePictureController.cs  # upload / get (ETag, 304) / delete profile picture
@@ -164,8 +169,9 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 
 | Method | Route                                  | Auth                    | Description |
 |--------|----------------------------------------|-------------------------|-------------|
-| POST   | `/api/auth/register`                   | none, rate limited      | Creates a user with `Roles:Initial`, returns user + tokens |
-| POST   | `/api/auth/login`                      | none, rate limited      | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
+| POST   | `/api/auth/register`                   | none, rate limited      | Body `{ username, email, password }`; creates a user with `Roles:Initial`, returns `{ user, roles, accessToken, refreshToken }` |
+| POST   | `/api/auth/login`                      | none, rate limited      | Body `{ username \| email, password }` (exactly one identifier); returns `{ user, roles, accessToken, refreshToken }` |
+| POST   | `/api/auth/session`                    | none, rate limited      | Body `{ accessToken?, refreshToken? }`; returns `{ user, roles }` for a valid access token, otherwise rotates the refresh token and also returns the new `accessToken`/`refreshToken` |
 | POST   | `/api/auth/logout`                     | authenticated, limited  | Body `{ refreshToken }`; revokes the session of that refresh token; always 204 |
 | POST   | `/api/auth/logoutAll`                  | authenticated, limited  | Revokes every session of the caller and changes the security stamp; always 204 |
 | POST   | `/api/token/refresh`                   | none                    | Rotates a refresh token and issues a new access token |
@@ -185,7 +191,9 @@ dimensions are validated. Oversized uploads are rejected while reading: 413 from
 400 if the multipart body exceeds the limit before the file reaches it. Pictures are served with
 `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`.
 
-`refreshTokenHash` in request bodies carries the raw refresh token despite its name.
+`refreshTokenHash` in the `/api/token/refresh` body carries the raw refresh token despite its name.
+
+Invalid request bodies are rejected with 400 and a `ValidationProblemDetails` body.
 
 ## Token Model
 
@@ -240,8 +248,10 @@ project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- The shared `DataModel` should be split into per-endpoint contracts in `Controllers/Contracts`,
-  renaming `RefreshTokenHash` to `RefreshToken` (public contract change).
+- `DataModel` and `ResponseDTO` are still used by `TokenController`; they should be replaced with
+  per-endpoint contracts in `Controllers/Contracts`, renaming `RefreshTokenHash` to `RefreshToken`
+  (public contract change).
+- `User.RequireUniqueEmail` is not set, so duplicate emails are accepted and break login by email.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.

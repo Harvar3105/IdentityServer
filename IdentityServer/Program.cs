@@ -57,6 +57,8 @@ var passwordPolicySection = builder.Configuration.GetSection("Security:Password"
 if (!passwordPolicySection.Exists())
   throw new InvalidOperationException("Security:Password is not configured.");
 
+// FIXME: User.RequireUniqueEmail is not set, so several users can register with one email,
+// and login by email then fails: FindByEmailAsync throws when the email is not unique.
 builder.Services.AddIdentity<User, Role>(options =>
   {
     passwordPolicySection.Bind(options.Password);
