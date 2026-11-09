@@ -8,7 +8,6 @@ using Microsoft.Extensions.Options;
 
 namespace IdentityServer.Controllers;
 
-// FIXME: An unknown userId returns 400 "User not found!" here, while ProfilePictureController answers 404.
 [Route("api/[controller]")]
 [ApiController]
 [Authorize]
@@ -31,7 +30,7 @@ public class ManageController : ControllerBase
     if (!CanManageRole(request.Role)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(request.UserId.ToString());
-    if (user is null) return BadRequest("User not found!");
+    if (user is null) return NotFound("User not found!");
 
     var success = await _userManager.AddToRoleAsync(user, request.Role);
     if (!success.Succeeded) return BadRequest($"Cannot assign {request.Role} to user!");
@@ -48,7 +47,7 @@ public class ManageController : ControllerBase
     if (!CanManageRole(request.Role)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(request.UserId.ToString());
-    if (user is null) return BadRequest("User not found!");
+    if (user is null) return NotFound("User not found!");
 
     if (_roleSettings.IsRoot(request.Role) && (await _userManager.GetUsersInRoleAsync(_roleSettings.Root)).Count <= 1)
       return BadRequest("Cannot remove the root role from its last holder!");
@@ -68,7 +67,7 @@ public class ManageController : ControllerBase
     if (!IsRoleManagerOrSelf(query.UserId)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(query.UserId.ToString());
-    if (user is null) return BadRequest("User not found!");
+    if (user is null) return NotFound("User not found!");
 
     return Ok(await CreateUserRolesResponse(user));
   }
@@ -80,7 +79,7 @@ public class ManageController : ControllerBase
     if (!IsRoleManagerOrSelf(query.UserId)) return Forbid();
 
     var user = await _userManager.FindByIdAsync(query.UserId.ToString());
-    if (user is null) return BadRequest("User not found!");
+    if (user is null) return NotFound("User not found!");
 
     return Ok(new HasRoleResponse { HasRole = await _userManager.IsInRoleAsync(user, query.Role) });
   }
