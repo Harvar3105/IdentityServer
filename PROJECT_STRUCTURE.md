@@ -59,9 +59,25 @@ IdentityServer/                      # repository root
     ├── Properties/
     │   └── launchSettings.json      # http :5078, https :7066
     ├── Controllers/
-    │   ├── Contracts/               # per-endpoint request contracts
-    │   │   └── LogoutRequest.cs     # { refreshToken } body for logout
-    │   ├── AuthController.cs        # register / login / logout / logoutAll; also defines shared DataModel
+    │   ├── Contracts/               # per-endpoint request and response contracts
+    │   │   ├── RegisterRequest.cs   # { username, email, password }
+    │   │   ├── LoginRequest.cs      # { username | email, password }
+    │   │   ├── SessionRequest.cs    # { accessToken?, refreshToken? }, at least one
+    │   │   ├── LogoutRequest.cs     # { refreshToken } body for logout
+    │   │   ├── RefreshRequest.cs    # { refreshToken }
+    │   │   ├── ValidateTokenRequest.cs  # { accessToken }
+    │   │   ├── AuthResponse.cs      # register / login: user, roles, new token pair
+    │   │   ├── SessionResponse.cs   # session: user, roles, rotated token pair if the refresh token was used
+    │   │   ├── TokenPairResponse.cs # refresh: rotated token pair
+    │   │   ├── ValidateTokenResponse.cs  # validate: { valid }
+    │   │   ├── UserRoleRequest.cs   # { userId, role } body for assignRole / removeRole
+    │   │   ├── UserRolesQuery.cs    # ?userId= for userRoles
+    │   │   ├── HasRoleQuery.cs      # ?userId=&role= for hasRole
+    │   │   ├── UserRolesResponse.cs # { userId, roles }
+    │   │   ├── HasRoleResponse.cs   # { hasRole }
+    │   │   ├── UploadProfilePictureRequest.cs  # multipart field `file`
+    │   │   └── ProfilePictureResponse.cs  # upload: flat picture metadata
+    │   ├── AuthController.cs        # register / login / session / logout / logoutAll
     │   ├── TokenController.cs       # refresh / validate
     │   ├── ManageController.cs      # role management (root / manager roles)
     │   └── ProfilePictureController.cs  # upload / get (ETag, 304) / delete profile picture
@@ -71,9 +87,7 @@ IdentityServer/                      # repository root
     │   ├── Dtos/
     │   │   ├── ImageInfo.cs         # detected content type + width/height of an image
     │   │   ├── ProfilePictureMetadata.cs  # picture metadata without the image bytes
-    │   │   ├── ResponseDTO.cs       # common response envelope
-    │   │   ├── UserDTO.cs           # public user projection
-    │   │   └── UserRoleRequest.cs   # { userId, role } body for role management
+    │   │   └── UserDTO.cs           # public user projection
     │   ├── Entities/                # namespace: IdentityServer.Entities
     │   │   ├── User.cs              # IdentityUser<Guid> + CreatedAt, LastLogin, RefreshTokens
     │   │   ├── Role.cs              # IdentityRole<Guid>
@@ -100,7 +114,7 @@ IdentityServer/                      # repository root
     │   ├── RateLimitPolicies.cs     # rate limiter policy names
     │   └── RequestLoggingMiddleware.cs  # Development-only logging of JSON bodies with secrets masked
     └── Migrations/                  # EF Core migrations (InitialCreate, AddProfilePictures, MapUserClaimsNavigation,
-                                     # AddRefreshTokenSessionId)
+                                     # AddRefreshTokenSessionId, MakeEmailIndexUnique)
 ```
 
 ## Configuration
@@ -164,17 +178,18 @@ role set of each seeded user; users with roles missing from `Roles:Available` ar
 
 | Method | Route                                  | Auth                    | Description |
 |--------|----------------------------------------|-------------------------|-------------|
-| POST   | `/api/auth/register`                   | none, rate limited      | Creates a user with `Roles:Initial`, returns user + tokens |
-| POST   | `/api/auth/login`                      | none, rate limited      | Logs in by `username`+`password`, `email`+`password`, or `accessToken`/`refreshTokenHash` |
+| POST   | `/api/auth/register`                   | none, rate limited      | Body `{ username, email, password }`; creates a user with `Roles:Initial`, returns `{ user, roles, accessToken, refreshToken }` |
+| POST   | `/api/auth/login`                      | none, rate limited      | Body `{ username \| email, password }` (exactly one identifier); returns `{ user, roles, accessToken, refreshToken }` |
+| POST   | `/api/auth/session`                    | none, rate limited      | Body `{ accessToken?, refreshToken? }`; returns `{ user, roles }` for a valid access token, otherwise rotates the refresh token and also returns the new `accessToken`/`refreshToken` |
 | POST   | `/api/auth/logout`                     | authenticated, limited  | Body `{ refreshToken }`; revokes the session of that refresh token; always 204 |
 | POST   | `/api/auth/logoutAll`                  | authenticated, limited  | Revokes every session of the caller and changes the security stamp; always 204 |
-| POST   | `/api/token/refresh`                   | none                    | Rotates a refresh token and issues a new access token |
-| POST   | `/api/token/validate`                  | none                    | Validates an access token passed as a raw JSON string body |
-| POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available` |
-| POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role |
-| GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Lists the user's roles |
-| GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns whether the user has the role |
-| PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns its metadata |
+| POST   | `/api/token/refresh`                   | none                    | Body `{ refreshToken }`; rotates it, returns `{ accessToken, refreshToken }` |
+| POST   | `/api/token/validate`                  | none                    | Body `{ accessToken }`; always 200 with `{ valid }` |
+| POST   | `/api/manage/assignRole`               | root or manager         | Body `{ userId, role }`; assigns a role from `Roles:Available`, returns `{ userId, roles }` |
+| POST   | `/api/manage/removeRole`               | root or manager         | Body `{ userId, role }`; the last root holder cannot lose the root role; returns `{ userId, roles }` |
+| GET    | `/api/manage/userRoles?userId=`        | self, root or manager   | Returns `{ userId, roles }` |
+| GET    | `/api/manage/hasRole?userId=&role=`    | self, root or manager   | Returns `{ hasRole }` |
+| PUT    | `/api/profilePicture`                  | any authenticated user  | Multipart field `file`; replaces the caller's picture, returns `{ contentType, width, height, sizeBytes, contentHash, updatedAt }` |
 | GET    | `/api/profilePicture/{userId}`         | none                    | Image bytes with `ETag`/`Last-Modified`; `If-None-Match` gives 304 |
 | DELETE | `/api/profilePicture`                  | any authenticated user  | Deletes the caller's picture; 404 if there is none |
 | DELETE | `/api/profilePicture/{userId}`         | root or manager         | Moderation: deletes a user's picture (cannot replace it); managers cannot target root or manager holders; logged |
@@ -185,7 +200,7 @@ dimensions are validated. Oversized uploads are rejected while reading: 413 from
 400 if the multipart body exceeds the limit before the file reaches it. Pictures are served with
 `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`.
 
-`refreshTokenHash` in request bodies carries the raw refresh token despite its name.
+Invalid request bodies are rejected with 400 and a `ValidationProblemDetails` body.
 
 ## Token Model
 
@@ -240,8 +255,8 @@ project name (`-p`), `AUTH_PORT` and `DB_PORT`.
 Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
-- The shared `DataModel` should be split into per-endpoint contracts in `Controllers/Contracts`,
-  renaming `RefreshTokenHash` to `RefreshToken` (public contract change).
+- `/api/token/refresh` rejects a token with 400, while `/api/auth/session` uses 401.
+- `/api/manage/*` answers 400 for an unknown `userId`, while `/api/profilePicture` uses 404.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
 - `RefreshToken.TokenHash` is `nvarchar(max)` without an index, so every token lookup scans the table.
 - Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.

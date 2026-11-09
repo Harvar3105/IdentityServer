@@ -61,6 +61,10 @@ builder.Services.AddIdentity<User, Role>(options =>
   {
     passwordPolicySection.Bind(options.Password);
 
+    // Login by email requires one user per email: FindByEmailAsync throws when several users share it.
+    // Also enforced by the unique EmailIndex (see ApplicationDbContext).
+    options.User.RequireUniqueEmail = true;
+
     options.Lockout.AllowedForNewUsers = lockoutAllowedForNewUsers;
     options.Lockout.MaxFailedAccessAttempts = lockoutMaxFailedAttempts;
     options.Lockout.DefaultLockoutTimeSpan = lockoutDuration;

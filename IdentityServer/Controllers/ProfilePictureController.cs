@@ -1,3 +1,4 @@
+using IdentityServer.Controllers.Contracts;
 using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using IdentityServer.Filters;
@@ -31,17 +32,18 @@ public class ProfilePictureController : ControllerBase
   [HttpPut]
   [Consumes("multipart/form-data")]
   [TypeFilter<ProfilePictureUploadLimitFilter>]
+  [ProducesResponseType<ProfilePictureResponse>(StatusCodes.Status200OK)]
   // TODO: Add a per-user rate limit for uploads.
-  public async Task<IActionResult> Upload(IFormFile file, CancellationToken cancellationToken)
+  public async Task<IActionResult> Upload([FromForm] UploadProfilePictureRequest request, CancellationToken cancellationToken)
   {
     if (!TryGetCurrentUserId(out var userId)) return Unauthorized();
 
-    await using var content = file.OpenReadStream();
+    await using var content = request.File.OpenReadStream();
     var result = await _profilePictureService.Upload(userId, content, cancellationToken);
 
     return result.Error switch
     {
-      null => Ok(result.Picture),
+      null => Ok(ProfilePictureResponse.From(result.Picture!)),
       ProfilePictureUploadError.TooLarge => StatusCode(StatusCodes.Status413PayloadTooLarge, "File is too large!"),
       ProfilePictureUploadError.Empty => BadRequest("File is empty!"),
       ProfilePictureUploadError.UnknownFormat => BadRequest("File is not a supported image!"),

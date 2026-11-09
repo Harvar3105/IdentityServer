@@ -1,7 +1,5 @@
-using IdentityServer.Domain.Dtos;
+using IdentityServer.Controllers.Contracts;
 using IdentityServer.Domain.Services;
-using IdentityServer.Entities;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,31 +9,25 @@ namespace IdentityServer.Controllers;
 [ApiController]
 public class TokenController : ControllerBase
 {
-  private readonly UserManager<User> _userManager;
   private readonly ITokenService _tokenService;
   private readonly ILogger<TokenController> _logger;
   private readonly ApplicationDbContext _dbContext;
 
-  public TokenController(UserManager<User> userManager, ITokenService tokenService, ILogger<TokenController> logger, ApplicationDbContext dbContext)
+  public TokenController(ITokenService tokenService, ILogger<TokenController> logger, ApplicationDbContext dbContext)
   {
-    _userManager = userManager;
     _tokenService = tokenService;
     _logger = logger;
     _dbContext = dbContext;
   }
 
+  // FIXME: A rejected refresh token returns 400 here but 401 from /api/auth/session, and "User not found"
+  // tells the caller more than "Invalid or expired refresh token" does.
   [HttpPost("refresh")]
-  public async Task<IActionResult> RefreshJWTToken([FromBody] DataModel model)
+  [ProducesResponseType<TokenPairResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
   {
-    _logger.LogInformation("⚠️Refreshing token");
-    if (string.IsNullOrEmpty(model.RefreshTokenHash))
-    {
-      _logger.LogError("💥Refresh Token is missing");
-      return BadRequest("Refresh Token is missing");
-    }
-
     var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var refreshToken = await _tokenService.FindActiveRefreshToken(model.RefreshTokenHash, ipAddress);
+    var refreshToken = await _tokenService.FindActiveRefreshToken(request.RefreshToken, ipAddress);
 
     if (refreshToken == null)
     {
@@ -57,18 +49,15 @@ public class TokenController : ControllerBase
       return BadRequest("Invalid or expired refresh token");
     }
 
-    return Ok(new ResponseDTO { AccessToken = result.Value.token, RefreshToken = result.Value.refreshToken });
+    return Ok(new TokenPairResponse { AccessToken = result.Value.token, RefreshToken = result.Value.refreshToken });
   }
 
+  // Always 200: an invalid token is a normal answer of this endpoint, not a malformed request.
   [HttpPost("validate")]
-  public async Task<IActionResult> ValidateToken([FromBody] string token)
+  [ProducesResponseType<ValidateTokenResponse>(StatusCodes.Status200OK)]
+  public async Task<IActionResult> Validate([FromBody] ValidateTokenRequest request)
   {
-    var principal = await _tokenService.ValidateAccessToken(token);
-    if (principal == null)
-    {
-      return BadRequest(new { valid = false, error = "Invalid token" });
-    }
-    return Ok(new ResponseDTO { IsAaccessTokenValid = true });
+    var principal = await _tokenService.ValidateAccessToken(request.AccessToken);
+    return Ok(new ValidateTokenResponse { Valid = principal != null });
   }
-
 }
