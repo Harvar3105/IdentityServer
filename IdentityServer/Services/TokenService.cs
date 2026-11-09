@@ -6,6 +6,7 @@ using IdentityServer.Domain.Services;
 using IdentityServer.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.IdentityModel.Tokens;
 
 namespace IdentityServer.Services;
@@ -159,14 +160,20 @@ public class TokenService : ITokenService
 
   public async Task<bool> RevokeAllSessions(Guid userId, string ipAddress)
   {
-    // FIXME: ExecuteUpdateAsync bypasses the change tracker: refresh tokens already tracked by this DbContext
-    // keep RevokedAt == null and still report IsActive == true for the rest of the request.
     var revokedAt = DateTime.UtcNow;
     var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
       .ExecuteUpdateAsync(setters => setters
         .SetProperty(rt => rt.RevokedAt, revokedAt)
         .SetProperty(rt => rt.RevokedByIp, ipAddress));
+
+    // ExecuteUpdateAsync bypasses the change tracker, so tokens this DbContext already loaded would still look active.
+    // Added entries are skipped: they are not in the database yet and were not affected by the UPDATE.
+    var trackedActiveTokens = _dbContext.ChangeTracker.Entries<RefreshToken>()
+      .Where(entry => entry.State is EntityState.Unchanged or EntityState.Modified &&
+        entry.Entity.UserId == userId && entry.Entity.RevokedAt == null)
+      .ToList();
+    foreach (var entry in trackedActiveTokens) MarkTrackedTokenRevoked(entry, revokedAt, ipAddress);
 
     var user = await _userManager.FindByIdAsync(userId.ToString());
     if (user != null) await _userManager.UpdateSecurityStampAsync(user);
@@ -194,8 +201,6 @@ public class TokenService : ITokenService
   {
     // Conditional UPDATE executed in the database: of several concurrent requests holding the same
     // token only one sees RevokedAt == null, the others affect 0 rows and are rejected.
-    // FIXME: ExecuteUpdateAsync bypasses the change tracker: oldToken and any tracked copy keep RevokedAt == null,
-    // so a later lookup through the same DbContext (e.g. FindActiveRefreshToken) still sees the token as active.
     var revokedAt = DateTime.UtcNow;
     var affectedRows = await _dbContext.RefreshTokens
       .Where(rt => rt.Id == oldToken.Id && rt.RevokedAt == null)
@@ -204,7 +209,44 @@ public class TokenService : ITokenService
         .SetProperty(rt => rt.RevokedByIp, ipAddress)
         .SetProperty(rt => rt.ReplacedByTokenHash, newToken.TokenHash));
 
-    return affectedRows == 1;
+    // ExecuteUpdateAsync bypasses the change tracker. oldToken may be a detached instance, so it is updated directly,
+    // and the tracked instance with the same key (usually oldToken itself) is synchronized as well.
+    var trackedOldToken = _dbContext.ChangeTracker.Entries<RefreshToken>()
+      .FirstOrDefault(entry => entry.Entity.Id == oldToken.Id &&
+        entry.State is EntityState.Unchanged or EntityState.Modified);
+
+    if (affectedRows == 1)
+    {
+      oldToken.RevokedAt = revokedAt;
+      oldToken.RevokedByIp = ipAddress;
+      oldToken.ReplacedByTokenHash = newToken.TokenHash;
+      if (trackedOldToken != null) MarkTrackedTokenRevoked(trackedOldToken, revokedAt, ipAddress, newToken.TokenHash);
+      return true;
+    }
+
+    // A concurrent request revoked the token first; the tracked copy is reloaded so it reflects that revocation.
+    if (trackedOldToken != null) await trackedOldToken.ReloadAsync();
+    return false;
+  }
+
+  // Mirrors a revocation already written by ExecuteUpdateAsync. Original values are set too, so SaveChangesAsync
+  // does not treat these properties as modified and does not write them a second time.
+  private static void MarkTrackedTokenRevoked(EntityEntry<RefreshToken> entry, DateTime revokedAt, string ipAddress,
+    string? replacedByTokenHash = null)
+  {
+    var revokedAtProperty = entry.Property(rt => rt.RevokedAt);
+    revokedAtProperty.CurrentValue = revokedAt;
+    revokedAtProperty.OriginalValue = revokedAt;
+
+    var revokedByIpProperty = entry.Property(rt => rt.RevokedByIp);
+    revokedByIpProperty.CurrentValue = ipAddress;
+    revokedByIpProperty.OriginalValue = ipAddress;
+
+    if (replacedByTokenHash == null) return;
+
+    var replacedByTokenHashProperty = entry.Property(rt => rt.ReplacedByTokenHash);
+    replacedByTokenHashProperty.CurrentValue = replacedByTokenHash;
+    replacedByTokenHashProperty.OriginalValue = replacedByTokenHash;
   }
 
   public string HashToken(string token)

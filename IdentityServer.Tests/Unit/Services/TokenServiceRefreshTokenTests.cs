@@ -328,6 +328,35 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
   }
 
   [Fact]
+  public async Task RevokeAllSessions_TrackedToken_IsRevokedInMemoryWithoutPendingChanges()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (tracked, trackedRawToken) = await _fixture.AddRefreshTokenAsync(user);
+
+    Assert.True(await _fixture.TokenService.RevokeAllSessions(user.Id, AttackerIp));
+
+    Assert.False(tracked.IsActive);
+    Assert.Equal(AttackerIp, tracked.RevokedByIp);
+    Assert.Equal(EntityState.Unchanged, _fixture.DbContext.Entry(tracked).State);
+    Assert.Null(await _fixture.TokenService.FindActiveRefreshToken(trackedRawToken, TokenServiceFixture.IpAddress));
+  }
+
+  [Fact]
+  public async Task RevokeAllSessions_AddedNotSavedToken_IsNotMarkedRevoked()
+  {
+    var user = await _fixture.CreateUserAsync();
+    await _fixture.AddRefreshTokenAsync(user);
+    var (notSaved, _) = _fixture.TokenService.GenerateRefreshToken(TokenServiceFixture.IpAddress, user);
+    _fixture.DbContext.RefreshTokens.Add(notSaved);
+
+    Assert.True(await _fixture.TokenService.RevokeAllSessions(user.Id, AttackerIp));
+
+    // UpdateSecurityStampAsync saves the pending token, but it was not in the database when the UPDATE ran.
+    Assert.Null(notSaved.RevokedAt);
+    Assert.Null((await _fixture.ReloadRefreshTokenAsync(notSaved.Id)).RevokedAt);
+  }
+
+  [Fact]
   public async Task RefreshTokens_RotatesRefreshTokenAndIssuesValidAccessToken()
   {
     var user = await _fixture.CreateUserAsync();
@@ -394,5 +423,42 @@ public class TokenServiceRefreshTokenTests : IAsyncLifetime
     var (replacement, _) = _fixture.TokenService.GenerateRefreshToken(TokenServiceFixture.IpAddress, user);
 
     Assert.False(await _fixture.TokenService.TryRevokeRefreshToken(replacement, notPersisted, TokenServiceFixture.IpAddress));
+  }
+
+  [Fact]
+  public async Task TryRevokeRefreshToken_TrackedToken_IsRevokedInMemoryWithoutPendingChanges()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (oldToken, _) = await _fixture.AddRefreshTokenAsync(user);
+    var (replacement, _) = _fixture.TokenService.GenerateRefreshToken(RotationIp, user);
+
+    Assert.True(await _fixture.TokenService.TryRevokeRefreshToken(replacement, oldToken, RotationIp));
+
+    Assert.False(oldToken.IsActive);
+    Assert.Equal(RotationIp, oldToken.RevokedByIp);
+    Assert.Equal(replacement.TokenHash, oldToken.ReplacedByTokenHash);
+    Assert.Equal(EntityState.Unchanged, _fixture.DbContext.Entry(oldToken).State);
+  }
+
+  [Fact]
+  public async Task TryRevokeRefreshToken_RevokedByConcurrentRequest_ReloadsTrackedToken()
+  {
+    var user = await _fixture.CreateUserAsync();
+    var (oldToken, _) = await _fixture.AddRefreshTokenAsync(user);
+    var (replacement, _) = _fixture.TokenService.GenerateRefreshToken(AttackerIp, user);
+    const string concurrentReplacementHash = "concurrent-replacement-hash";
+    // Simulates another request: the row is revoked in the database while the tracked instance stays stale.
+    await _fixture.DbContext.RefreshTokens
+      .Where(rt => rt.Id == oldToken.Id)
+      .ExecuteUpdateAsync(setters => setters
+        .SetProperty(rt => rt.RevokedAt, DateTime.UtcNow)
+        .SetProperty(rt => rt.RevokedByIp, RotationIp)
+        .SetProperty(rt => rt.ReplacedByTokenHash, concurrentReplacementHash));
+
+    Assert.False(await _fixture.TokenService.TryRevokeRefreshToken(replacement, oldToken, AttackerIp));
+
+    Assert.False(oldToken.IsActive);
+    Assert.Equal(RotationIp, oldToken.RevokedByIp);
+    Assert.Equal(concurrentReplacementHash, oldToken.ReplacedByTokenHash);
   }
 }
