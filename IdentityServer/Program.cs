@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -9,6 +10,7 @@ using IdentityServer.Middleware;
 using IdentityServer.Repositories;
 using IdentityServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -82,12 +84,35 @@ var credentialRateLimitWindow = TimeSpan.FromSeconds(
   builder.Configuration.GetValue<int?>("Security:CredentialRateLimitWindowSeconds")
   ?? throw new InvalidOperationException("Security:CredentialRateLimitWindowSeconds is not configured."));
 
+// Client projects call the server through their BFF, so the socket address is the BFF for every user.
+// X-Forwarded-For is honoured only from these addresses; from anyone else it is ignored, otherwise a caller
+// could pick its own rate limit partition. Entries are IP addresses or CIDR networks; empty disables forwarding.
+var trustedProxyEntries = builder.Configuration.GetSection("Security:TrustedProxies").Get<string[]>() ?? [];
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+  options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+  // Takes only the rightmost X-Forwarded-For entry, the one the trusted proxy appended.
+  options.ForwardLimit = 1;
+  // Defaults trust loopback, which would let any local process spoof the client IP.
+  options.KnownProxies.Clear();
+  options.KnownIPNetworks.Clear();
+  foreach (var entry in trustedProxyEntries)
+  {
+    if (entry.Contains('/') && System.Net.IPNetwork.TryParse(entry, out var network))
+      options.KnownIPNetworks.Add(network);
+    else if (IPAddress.TryParse(entry, out var address))
+      options.KnownProxies.Add(address);
+    else
+      throw new InvalidOperationException($"Security:TrustedProxies entry '{entry}' is not an IP address or CIDR network.");
+  }
+});
+
 // Lockout protects a single account; the per-IP limit also covers password spraying across many accounts.
 builder.Services.AddRateLimiter(options =>
 {
   options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
   options.AddPolicy(RateLimitPolicies.CredentialEndpoints, httpContext =>
-    // TODO: Behind a reverse proxy RemoteIpAddress is the proxy address; configure ForwardedHeaders first.
+    // RemoteIpAddress is the client IP forwarded by a trusted proxy (see Security:TrustedProxies).
     RateLimitPartition.GetFixedWindowLimiter(
       partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
       factory: _ => new FixedWindowRateLimiterOptions
@@ -181,6 +206,9 @@ builder.Services.AddOptions<ProfilePictureSettings>()
   .ValidateOnStart();
 
 var app = builder.Build();
+
+// First, so that logging, rate limiting and refresh token records see the forwarded client IP.
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {

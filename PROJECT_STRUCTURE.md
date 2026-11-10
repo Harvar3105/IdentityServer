@@ -145,6 +145,7 @@ Missing required keys stop the application at startup with an explicit error.
 | `LockoutAllowedForNewUsers`        | Whether newly created users can be locked out        |
 | `Password`                         | Identity `PasswordOptions`: `RequiredLength`, `RequiredUniqueChars`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`, `RequireNonAlphanumeric` |
 | `AllowedOrigins`                   | CORS origins allowed to call the API from a browser; empty blocks all |
+| `TrustedProxies`                   | IP addresses or CIDR networks (e.g. the client project's BFF) whose `X-Forwarded-For` is taken as the client IP; empty ignores the header |
 
 Plus `ConnectionStrings:DefaultConnection` for SQL Server.
 
@@ -257,7 +258,6 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `/api/manage/*` answers 400 for an unknown `userId`, while `/api/profilePicture` uses 404.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
-- Rate limiting by IP needs `ForwardedHeaders` behind a reverse proxy.
 - The `dbcreator` role of `DB_USER` also allows creating databases of other names and dropping
   databases the login owns.
 - No cleanup of expired/revoked refresh tokens yet.

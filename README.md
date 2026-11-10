@@ -51,6 +51,12 @@ The application stops at startup with an explicit error if a required key is mis
   - `Security:JWTSecret` — a unique random value of at least 32 bytes, e.g. `openssl rand -base64 48`.
   - `Security:JWTIssuer` / `Security:JWTAudience` — the values the client project validates.
   - `Security:AllowedOrigins` — browser origins of the client project.
+  - `Security:TrustedProxies` — addresses of the client project's BFF (or reverse proxy) that forwards
+    the user's IP in `X-Forwarded-For`; without it every user shares the BFF's rate limit. Only the
+    rightmost header entry is used, and only for requests from these addresses. List exact addresses:
+    a network such as the whole `shared-network` subnet also trusts every other container on it and,
+    for the published `AUTH_PORT`, possibly the Docker gateway, so their callers could spoof their IP.
+    For `dotnet run` with a BFF on the same machine use `[ "127.0.0.1", "::1" ]`.
 - `instances/roles.json` and `instances/users.json` — every seed user role must be listed in
   `Roles:Available`, and seed passwords must satisfy `Security:Password`.
 
