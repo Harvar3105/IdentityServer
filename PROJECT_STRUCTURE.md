@@ -32,9 +32,6 @@ IdentityServer/                      # repository root
 ├── .gitignore                       # ignores everything in instances/ except the templates
 ├── .dockerignore                    # keeps bin/obj, instances/ and appsettings*.json out of the image
 ├── Dockerfile                       # SDK build stage -> aspnet runtime stage
-├── docker/
-│   └── sqlserver/
-│       └── create-login.sql         # creates the application login DB_USER with the dbcreator role
 ├── docker-compose.yml               # stack "identityserver": server (mounts instances/ as /app/config) + SQL Server
 ├── instances/                       # instance configuration; real files are git-ignored
 │   ├── example.env                  # template for .env: compose project name, port, environment, SA password
@@ -258,8 +255,8 @@ Tracked in code with `FIXME:` / `TODO:` (see `AGENTS.md`). Open items:
 - Microsoft package versions are 9.0.x while the target framework is `net10.0`.
 - `/api/manage/*` answers 400 for an unknown `userId`, while `/api/profilePicture` uses 404.
 - Reuse detection does not use `SessionId` yet, so it revokes every session of the user.
-- The `dbcreator` role of `DB_USER` also allows creating databases of other names and dropping
-  databases the login owns.
+- The application connects to SQL Server as `sa`, so a leaked connection string gives full control
+  of the SQL Server instance.
 - No cleanup of expired/revoked refresh tokens yet.
 - Access tokens are signed with a shared HMAC secret, so any resource server that validates them
   locally can also issue them; RS256/ES256 with a JWKS endpoint is planned.

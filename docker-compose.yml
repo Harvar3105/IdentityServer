@@ -14,7 +14,7 @@ x-sqlserver: &sqlserver
   ports:
     - "${DB_PORT:-1433}:1433"
   # "Login failed" also means the server accepts connections: a wrong MSSQL_SA_PASSWORD (e.g. an existing volume
-  # created with another one) then fails sqlserver-init with a clear error instead of an endless unhealthy wait.
+  # created with another one) then fails the server with a clear error instead of an endless unhealthy wait.
   healthcheck:
     test: [ "CMD-SHELL", "out=$$(/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" 2>&1) || echo \"$$out\" | grep -q 'Login failed'" ]
     interval: 10s
@@ -38,10 +38,14 @@ services:
       - ./instances:/app/config:ro
     ports:
       - "${AUTH_PORT:?AUTH_PORT is not set}:8080"
+    # Only the SQL Server of the active profile exists; with an empty COMPOSE_PROFILES (external SQL Server)
+    # both are ignored.
     depends_on:
-      sqlserver-init:
-        condition: service_completed_successfully
-        # Ignored when COMPOSE_PROFILES is empty and an external SQL Server is used.
+      sqlserver:
+        condition: service_healthy
+        required: false
+      sqlserver-test:
+        condition: service_healthy
         required: false
     networks:
       - default
@@ -60,26 +64,6 @@ services:
     <<: *sqlserver
     profiles: [ "test" ]
     restart: "no"
-
-  # One-shot: creates the application login DB_USER (or updates its password) on every "up".
-  sqlserver-init:
-    profiles: [ "persistent", "test" ]
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    restart: "no"
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-        required: false
-      sqlserver-test:
-        condition: service_healthy
-        required: false
-    environment:
-      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD is not set}
-      - DB_USER=${DB_USER:?DB_USER is not set}
-      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is not set}
-    volumes:
-      - ./docker/sqlserver/create-login.sql:/scripts/create-login.sql:ro
-    entrypoint: [ "/bin/sh", "-c", "/opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -i /scripts/create-login.sql" ]
 
 volumes:
   # Resolves to identityserver_sqlserver_data, so databases of the former separate SQL Server stack are kept.

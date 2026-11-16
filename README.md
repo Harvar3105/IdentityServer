@@ -38,11 +38,9 @@ The application stops at startup with an explicit error if a required key is mis
 
 - `instances/.env`
   - `AUTH_PORT` — host port of the server.
-  - `MSSQL_SA_PASSWORD` — SQL Server administrator password; only used to create `DB_USER`.
-  - `DB_USER` / `DB_PASSWORD` — the login the application connects with. It is created (or its password
-    updated) on every `docker compose up` and gets the `dbcreator` role, so it creates and owns its
-    database on the first start. Must match `User Id` and `Password` in the connection strings of
-    `appsettings*.json`, and must not contain `'`.
+  - `MSSQL_SA_PASSWORD` — SQL Server administrator password. The application connects as `sa` and
+    creates its database on the first start, so it must match `Password` in the connection strings of
+    `appsettings*.json`.
   - `COMPOSE_PROFILES`, `DB_PORT`, `DB_EDITION` — mode, host port and edition of the SQL Server, see
     [SQL Server modes](#sql-server-modes).
 - `instances/appsettings*.json`
@@ -92,7 +90,7 @@ docker compose --env-file instances/.env up -d --build
 `shared-network` lets containers of client projects reach the server as `authserver:8080`; the
 database is only on the stack's own network.
 
-The SQL Server starts first, then `sqlserver-init` creates `DB_USER`, then the server starts, applies
+The SQL Server starts first, then the server starts, applies
 migrations and creates the roles. The server listens on `http://localhost:<AUTH_PORT>`. With
 `ASPNETCORE_ENVIRONMENT=Development` in `instances/.env`, seed users are created and Swagger UI is
 available at `http://localhost:<AUTH_PORT>/swagger`.
@@ -124,11 +122,8 @@ docker compose --env-file instances/.env down
 docker compose --env-file instances/.env up -d
 ```
 
-A database created earlier by another login (e.g. `sa`) is not accessible to `DB_USER`; drop it or
-grant access to it manually.
-
 `MSSQL_SA_PASSWORD` only takes effect when the `identityserver_sqlserver_data` volume is created. If
-`sqlserver-init` fails with `Login failed for user 'sa'`, the volume was created with another password:
+the server fails with `Login failed for user 'sa'`, the volume was created with another password:
 put that password into `instances/.env`, or remove the volume (`docker volume rm identityserver_sqlserver_data`,
 deletes all databases) so that it is created again.
 
@@ -138,7 +133,7 @@ Start only the SQL Server from the stack, then the server with `dotnet run`:
 
 ```bash
 docker network create shared-network 2>/dev/null || true
-docker compose --env-file instances/.env up -d sqlserver sqlserver-init      # sqlserver-test in test mode
+docker compose --env-file instances/.env up -d sqlserver      # sqlserver-test in test mode
 dotnet run --project IdentityServer --launch-profile http
 ```
 
